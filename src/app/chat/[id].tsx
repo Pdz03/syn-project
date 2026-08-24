@@ -4,6 +4,7 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -16,6 +17,8 @@ import {
 import { Ionicons } from '@expo/vector-icons'
 import { router, useLocalSearchParams } from 'expo-router'
 import * as Notifications from 'expo-notifications'
+import * as Clipboard from 'expo-clipboard'
+import * as ImagePicker from 'expo-image-picker'
 
 import { Colors, SynSpacing } from '@/constants/colors'
 import { SynAvatar, SynEmptyState } from '@/components/syn-ui'
@@ -40,8 +43,23 @@ type ReceiptPayload = {
   read_at: string | null
 }
 
+type ChatProfile = {
+  id: string
+  display_name: string | null
+  username: string | null
+  avatar_url: string | null
+}
+
+type Reaction = {
+  message_id: string
+  user_id: string
+  emoji: string
+}
+
+const REACTION_OPTIONS = ['👍', '❤️', '😂', '🔥', '😮']
+
 export default function ChatScreen() {
-  const { id, displayName } = useLocalSearchParams<{
+  const { id, userId, displayName } = useLocalSearchParams<{
     id: string
     userId?: string
     displayName?: string
@@ -54,11 +72,16 @@ export default function ChatScreen() {
   const [text, setText] = useState('')
   const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(false)
+  const [uploadingMedia, setUploadingMedia] = useState(false)
+  const [chatProfile, setChatProfile] = useState<ChatProfile | null>(null)
+  const [imageUrls, setImageUrls] = useState<Record<string, string>>({})
+  const [reactions, setReactions] = useState<Reaction[]>([])
 
   useEffect(() => {
     if (!id) return
 
     loadMessages()
+    loadChatProfile()
     markAsRead()
     clearChatNotifications()
 
@@ -84,6 +107,10 @@ export default function ChatScreen() {
           if (newMessage.sender_id !== user?.id) {
             markAsRead()
             clearChatNotifications()
+          }
+
+          if (newMessage.type === 'image') {
+            loadImageUrl(newMessage)
           }
 
           setMessages((current) => {
@@ -149,6 +176,45 @@ export default function ChatScreen() {
           )
         }
       )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'message_reactions',
+          filter: `conversation_id=eq.${id}`,
+        },
+        (payload) => {
+          const nextReaction = payload.new as Reaction | null
+          const oldReaction = payload.old as Reaction | null
+
+          setReactions((current) => {
+            if (payload.eventType === 'DELETE' && oldReaction) {
+              return current.filter(
+                (reaction) =>
+                  !(
+                    reaction.message_id === oldReaction.message_id &&
+                    reaction.user_id === oldReaction.user_id
+                  )
+              )
+            }
+
+            if (!nextReaction) {
+              return current
+            }
+
+            const withoutCurrent = current.filter(
+              (reaction) =>
+                !(
+                  reaction.message_id === nextReaction.message_id &&
+                  reaction.user_id === nextReaction.user_id
+                )
+            )
+
+            return [...withoutCurrent, nextReaction]
+          })
+        }
+      )
       .subscribe((status, error) => {
         console.log('REALTIME STATUS:', status)
 
@@ -178,7 +244,45 @@ export default function ChatScreen() {
         console.error('REMOVE CHANNEL ERROR:', error)
       })
     }
-  }, [id, user?.id])
+  }, [id, user?.id, userId])
+
+  async function loadChatProfile() {
+    if (userId) {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, display_name, username, avatar_url')
+        .eq('id', userId)
+        .maybeSingle()
+
+      if (!error) {
+        setChatProfile(data)
+      }
+
+      return
+    }
+
+    const { data: member, error: memberError } = await supabase
+      .from('conversation_members')
+      .select('user_id')
+      .eq('conversation_id', id)
+      .neq('user_id', user?.id)
+      .limit(1)
+      .maybeSingle()
+
+    if (memberError || !member?.user_id) {
+      return
+    }
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, display_name, username, avatar_url')
+      .eq('id', member.user_id)
+      .maybeSingle()
+
+    if (!error) {
+      setChatProfile(data)
+    }
+  }
 
   async function loadMessages(showLoading = true) {
     try {
@@ -194,14 +298,18 @@ export default function ChatScreen() {
       )
 
       if (!rpcError) {
+        const nextMessages = ((rpcData ?? []) as Array<
+          Message & { receipt_status?: string }
+        >).map((message) => ({
+          ...message,
+          receiptStatus: toReceiptStatus(message.receipt_status),
+        }))
+
         setMessages(
-          ((rpcData ?? []) as Array<Message & { receipt_status?: string }>).map(
-            (message) => ({
-              ...message,
-              receiptStatus: toReceiptStatus(message.receipt_status),
-            })
-          )
+          nextMessages
         )
+        loadImageUrls(nextMessages)
+        loadReactions(nextMessages)
         return
       }
 
@@ -229,7 +337,10 @@ export default function ChatScreen() {
         return
       }
 
-      setMessages((data ?? []) as Message[])
+      const nextMessages = (data ?? []) as Message[]
+      setMessages(nextMessages)
+      loadImageUrls(nextMessages)
+      loadReactions(nextMessages)
     } finally {
       if (showLoading) {
         setLoading(false)
@@ -288,6 +399,127 @@ export default function ChatScreen() {
     }
   }
 
+  async function handlePickImage() {
+    if (!id || !user?.id || uploadingMedia) {
+      return
+    }
+
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync()
+
+    if (!permission.granted) {
+      Alert.alert('Gallery access', 'Izinkan akses galeri untuk mengirim foto.')
+      return
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsMultipleSelection: false,
+      quality: 0.82,
+    })
+
+    if (result.canceled || !result.assets[0]) {
+      return
+    }
+
+    await sendImageAsset(result.assets[0])
+  }
+
+  async function handleTakePhoto() {
+    if (!id || !user?.id || uploadingMedia) {
+      return
+    }
+
+    const permission = await ImagePicker.requestCameraPermissionsAsync()
+
+    if (!permission.granted) {
+      Alert.alert('Camera access', 'Izinkan akses kamera untuk mengambil foto.')
+      return
+    }
+
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ['images'],
+      quality: 0.82,
+    })
+
+    if (result.canceled || !result.assets[0]) {
+      return
+    }
+
+    await sendImageAsset(result.assets[0])
+  }
+
+  async function sendImageAsset(asset: ImagePicker.ImagePickerAsset) {
+    if (!id || !user?.id) {
+      return
+    }
+
+    const localId = `local-image-${Date.now()}`
+    const mediaPath = buildMediaPath(id, user.id, asset.uri)
+
+    try {
+      setUploadingMedia(true)
+      setImageUrls((current) => ({
+        ...current,
+        [localId]: asset.uri,
+      }))
+      setMessages((current) => [
+        ...current,
+        {
+          id: localId,
+          conversation_id: id,
+          sender_id: user.id,
+          type: 'image',
+          content: mediaPath,
+          created_at: new Date().toISOString(),
+          localStatus: 'pending',
+          receiptStatus: 'sent',
+        },
+      ])
+
+      const response = await fetch(asset.uri)
+      const blob = await response.blob()
+
+      const { error: uploadError } = await supabase.storage
+        .from('chat-media')
+        .upload(mediaPath, blob, {
+          contentType: asset.mimeType ?? 'image/jpeg',
+          upsert: false,
+        })
+
+      if (uploadError) {
+        throw uploadError
+      }
+
+      const { error } = await supabase.rpc('send_image_message', {
+        target_conversation_id: id,
+        media_path: mediaPath,
+      })
+
+      if (error) {
+        throw error
+      }
+
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === localId
+            ? { ...message, localStatus: 'sent', receiptStatus: 'sent' }
+            : message
+        )
+      )
+    } catch (error) {
+      console.error('SEND IMAGE:', error)
+      setMessages((current) => current.filter((message) => message.id !== localId))
+      setImageUrls((current) => {
+        const next = { ...current }
+        delete next[localId]
+        return next
+      })
+      Alert.alert('Upload failed', 'Gagal mengirim foto. Coba lagi.')
+    } finally {
+      setUploadingMedia(false)
+    }
+  }
+
   async function handleNudge() {
     if (!id) return
 
@@ -330,6 +562,115 @@ export default function ChatScreen() {
     }
   }
 
+  function openProfile() {
+    const profileId = chatProfile?.id ?? userId
+
+    if (!profileId) {
+      return
+    }
+
+    router.push({
+      pathname: '/profile/[id]',
+      params: {
+        id: profileId,
+      },
+    })
+  }
+
+  function openMessageActions(message: Message) {
+    if (message.id.startsWith('local-')) {
+      return
+    }
+
+    const reactionButtons = REACTION_OPTIONS.map((emoji) => ({
+      text: emoji,
+      onPress: () => toggleReaction(message.id, emoji),
+    }))
+
+    Alert.alert('Message', undefined, [
+      ...reactionButtons,
+      ...(message.type === 'text' && message.content
+        ? [
+            {
+              text: 'Copy',
+              onPress: () => {
+                Clipboard.setStringAsync(message.content ?? '').catch((error) => {
+                  console.warn('COPY MESSAGE:', error)
+                })
+              },
+            },
+          ]
+        : []),
+      {
+        text: 'Cancel',
+        style: 'cancel',
+      },
+    ])
+  }
+
+  async function toggleReaction(messageId: string, emoji: string) {
+    const { error } = await supabase.rpc('toggle_message_reaction', {
+      target_message_id: messageId,
+      reaction_emoji: emoji,
+    })
+
+    if (error) {
+      console.warn('TOGGLE REACTION:', error.message)
+      Alert.alert('Reaction failed', 'Belum bisa menambahkan reaction.')
+    }
+  }
+
+  async function loadImageUrls(nextMessages: Message[]) {
+    nextMessages
+      .filter((message) => message.type === 'image' && message.content)
+      .forEach((message) => {
+        loadImageUrl(message)
+      })
+  }
+
+  async function loadImageUrl(message: Message) {
+    if (!message.content) {
+      return
+    }
+
+    const { data, error } = await supabase.storage
+      .from('chat-media')
+      .createSignedUrl(message.content, 60 * 60)
+
+    if (error || !data?.signedUrl) {
+      console.warn('IMAGE URL:', error?.message)
+      return
+    }
+
+    setImageUrls((current) => ({
+      ...current,
+      [message.id]: data.signedUrl,
+    }))
+  }
+
+  async function loadReactions(nextMessages: Message[]) {
+    const messageIds = nextMessages
+      .filter((message) => !message.id.startsWith('local-'))
+      .map((message) => message.id)
+
+    if (!messageIds.length) {
+      setReactions([])
+      return
+    }
+
+    const { data, error } = await supabase
+      .from('message_reactions')
+      .select('message_id, user_id, emoji')
+      .in('message_id', messageIds)
+
+    if (error) {
+      console.warn('LOAD REACTIONS:', error.message)
+      return
+    }
+
+    setReactions((data ?? []) as Reaction[])
+  }
+
   function clearChatNotifications() {
     Notifications.getPresentedNotificationsAsync()
       .then((notifications) => {
@@ -352,7 +693,11 @@ export default function ChatScreen() {
       })
   }
 
-  const chatName = displayName ?? 'Syn'
+  const chatName =
+    chatProfile?.display_name ??
+    chatProfile?.username ??
+    displayName ??
+    'Syn'
 
   return (
     <KeyboardAvoidingView
@@ -373,12 +718,18 @@ export default function ChatScreen() {
           />
         </Pressable>
 
-        <SynAvatar
-          name={chatName}
-          size={38}
-        />
+        <Pressable onPress={openProfile}>
+          <SynAvatar
+            name={chatName}
+            uri={chatProfile?.avatar_url}
+            size={38}
+          />
+        </Pressable>
 
-        <View style={styles.headerText}>
+        <Pressable
+          onPress={openProfile}
+          style={styles.headerText}
+        >
           <Text
             numberOfLines={1}
             style={styles.headerTitle}
@@ -386,7 +737,7 @@ export default function ChatScreen() {
             {chatName}
           </Text>
           <Text style={styles.headerSubtitle}>Syn</Text>
-        </View>
+        </Pressable>
 
         <Pressable
           accessibilityRole="button"
@@ -461,6 +812,11 @@ export default function ChatScreen() {
               )
             }
 
+            const imageUrl = imageUrls[item.id]
+            const itemReactions = getReactionSummary(
+              reactions.filter((reaction) => reaction.message_id === item.id)
+            )
+
             return (
               <>
                 {showDate && <DateSeparator dateValue={item.created_at} />}
@@ -471,14 +827,34 @@ export default function ChatScreen() {
                     mine ? styles.bubbleMine : styles.bubbleOther,
                   ]}
                 >
-                  <Text
-                    style={[
-                      styles.bubbleText,
-                      mine ? styles.bubbleTextMine : styles.bubbleTextOther,
-                    ]}
+                  <Pressable
+                    onLongPress={() => openMessageActions(item)}
                   >
-                    {item.content}
-                  </Text>
+                    {item.type === 'image' ? (
+                      imageUrl ? (
+                        <Image
+                          source={{ uri: imageUrl }}
+                          style={styles.messageImage}
+                        />
+                      ) : (
+                        <View style={styles.imagePlaceholder}>
+                          <ActivityIndicator
+                            size="small"
+                            color={mine ? '#FFFFFF' : Colors.primary}
+                          />
+                        </View>
+                      )
+                    ) : (
+                      <Text
+                        style={[
+                          styles.bubbleText,
+                          mine ? styles.bubbleTextMine : styles.bubbleTextOther,
+                        ]}
+                      >
+                        {item.content}
+                      </Text>
+                    )}
+                  </Pressable>
 
                   <View style={styles.metaRow}>
                     <Text
@@ -496,6 +872,27 @@ export default function ChatScreen() {
                       />
                     )}
                   </View>
+
+                  {itemReactions.length > 0 && (
+                    <View
+                      style={[
+                        styles.reactionRow,
+                        mine ? styles.reactionRowMine : styles.reactionRowOther,
+                      ]}
+                    >
+                      {itemReactions.map((reaction) => (
+                        <View
+                          key={reaction.emoji}
+                          style={styles.reactionChip}
+                        >
+                          <Text style={styles.reactionText}>
+                            {reaction.emoji}
+                            {reaction.count > 1 ? ` ${reaction.count}` : ''}
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
                 </View>
               </>
             )
@@ -504,6 +901,45 @@ export default function ChatScreen() {
       )}
 
       <View style={styles.composer}>
+        <Pressable
+          accessibilityRole="button"
+          onPress={handlePickImage}
+          disabled={uploadingMedia}
+          style={[
+            styles.mediaButton,
+            uploadingMedia && styles.sendButtonDisabled,
+          ]}
+        >
+          {uploadingMedia ? (
+            <ActivityIndicator
+              size="small"
+              color={Colors.primary}
+            />
+          ) : (
+            <Ionicons
+              name="image-outline"
+              size={20}
+              color={Colors.primary}
+            />
+          )}
+        </Pressable>
+
+        <Pressable
+          accessibilityRole="button"
+          onPress={handleTakePhoto}
+          disabled={uploadingMedia}
+          style={[
+            styles.mediaButton,
+            uploadingMedia && styles.sendButtonDisabled,
+          ]}
+        >
+          <Ionicons
+            name="camera-outline"
+            size={20}
+            color={Colors.primary}
+          />
+        </Pressable>
+
         <TextInput
           value={text}
           onChangeText={setText}
@@ -516,10 +952,10 @@ export default function ChatScreen() {
         <Pressable
           accessibilityRole="button"
           onPress={handleSend}
-          disabled={sending || !text.trim()}
+          disabled={sending || uploadingMedia || !text.trim()}
           style={[
             styles.sendButton,
-            (sending || !text.trim()) && styles.sendButtonDisabled,
+            (sending || uploadingMedia || !text.trim()) && styles.sendButtonDisabled,
           ]}
         >
           <Ionicons
@@ -584,6 +1020,19 @@ function toReceiptStatus(value?: string): Message['receiptStatus'] {
   }
 
   return undefined
+}
+
+function buildMediaPath(conversationId: string, userId: string, uri: string) {
+  const extension = uri.split('.').pop()?.split('?')[0] ?? 'jpg'
+
+  return `${conversationId}/${userId}/${Date.now()}.${extension}`
+}
+
+function getReactionSummary(nextReactions: Reaction[]) {
+  return REACTION_OPTIONS.map((emoji) => ({
+    emoji,
+    count: nextReactions.filter((reaction) => reaction.emoji === emoji).length,
+  })).filter((reaction) => reaction.count > 0)
 }
 
 function isSameDay(a: string, b: string) {
@@ -738,6 +1187,17 @@ const styles = StyleSheet.create({
   bubbleTextOther: {
     color: Colors.ink,
   },
+  messageImage: {
+    width: 220,
+    height: 220,
+    borderRadius: 14,
+  },
+  imagePlaceholder: {
+    width: 220,
+    height: 220,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   metaRow: {
     marginTop: 5,
     flexDirection: 'row',
@@ -766,6 +1226,29 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: '#FFFFFF',
   },
+  reactionRow: {
+    marginTop: 6,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+  },
+  reactionRowMine: {
+    justifyContent: 'flex-end',
+  },
+  reactionRowOther: {
+    justifyContent: 'flex-start',
+  },
+  reactionChip: {
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 999,
+    backgroundColor: Colors.surface,
+  },
+  reactionText: {
+    color: Colors.ink,
+    fontSize: 12,
+    fontWeight: '700',
+  },
   composer: {
     paddingHorizontal: 12,
     paddingTop: 10,
@@ -785,6 +1268,14 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     color: Colors.ink,
     backgroundColor: Colors.background,
+  },
+  mediaButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.primaryTint,
   },
   sendButton: {
     width: 44,

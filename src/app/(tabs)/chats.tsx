@@ -226,7 +226,7 @@ export default function ChatsScreen() {
                       unread && styles.messageUnread,
                     ]}
                   >
-                    {item.last_message ?? 'Start a conversation'}
+                    {formatLastMessage(item)}
                   </Text>
 
                   {item.last_message_sender_id === user?.id && (
@@ -260,6 +260,14 @@ function LastMessageStatus({
       color={status === 'read' ? Colors.primary : Colors.muted}
     />
   )
+}
+
+function formatLastMessage(item: ChatItem) {
+  if (item.last_message_type === 'image') {
+    return 'Photo'
+  }
+
+  return item.last_message ?? 'Start a conversation'
 }
 
 function formatTime(dateValue: string) {

@@ -30,6 +30,13 @@
       "expo-router",
       "expo-notifications",
       [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow Syn to access your photos so you can send them in chat.",
+          "cameraPermission": "Allow Syn to use your camera so you can take photos in chat."
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "backgroundColor": "#FF6B35",
