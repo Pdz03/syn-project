@@ -1,178 +1,124 @@
-import { useCallback, useState } from "react";
+import { useCallback, useState } from 'react'
 
 import {
-    ActivityIndicator,
-    FlatList,
-    Pressable,
-    RefreshControl,
-    Text,
-    View,
-} from "react-native";
+  ActivityIndicator,
+  FlatList,
+  Pressable,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native'
 
-import { router, useFocusEffect } from "expo-router";
+import { router, useFocusEffect } from 'expo-router'
+import Ionicons from '@expo/vector-icons/Ionicons'
 
-import Ionicons from "@expo/vector-icons/Ionicons";
-
-import { supabase } from "@/lib/supabase";
-
-import { Colors } from "@/constants/colors";
+import { Colors, SynSpacing } from '@/constants/colors'
+import { SynAvatar, SynBadge, SynEmptyState } from '@/components/syn-ui'
+import { supabase } from '@/lib/supabase'
 
 type ChatItem = {
-  conversation_id: string;
-
-  other_user_id: string;
-
-  display_name: string | null;
-
-  username: string | null;
-
-  syn_id: string;
-
-  avatar_url: string | null;
-
-  last_message: string | null;
-
-  last_message_type: string | null;
-
-  last_message_at: string | null;
-
-  unread_count: number;
-};
+  conversation_id: string
+  other_user_id: string
+  display_name: string | null
+  username: string | null
+  syn_id: string
+  avatar_url: string | null
+  last_message: string | null
+  last_message_type: string | null
+  last_message_at: string | null
+  unread_count: number
+}
 
 export default function ChatsScreen() {
-  const [chats, setChats] = useState<ChatItem[]>([]);
-
-  const [loading, setLoading] = useState(true);
-
-  const [refreshing, setRefreshing] = useState(false);
+  const [chats, setChats] = useState<ChatItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
 
   async function loadChats() {
     try {
-      const { data, error } = await supabase.rpc("get_my_chats");
+      const { data, error } = await supabase.rpc('get_my_chats')
 
       if (error) {
-        console.error("GET CHATS:", error);
-
-        return;
+        console.error('GET CHATS:', error)
+        return
       }
 
-      setChats((data ?? []) as ChatItem[]);
+      setChats((data ?? []) as ChatItem[])
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      setLoading(false)
+      setRefreshing(false)
     }
   }
 
   useFocusEffect(
     useCallback(() => {
-      loadChats();
+      loadChats()
 
-      const channelName = `chats-list:${Date.now()}`;
+      const channelName = `chats-list:${Date.now()}`
 
       const channel = supabase
         .channel(channelName)
         .on(
-          "postgres_changes",
+          'postgres_changes',
           {
-            event: "INSERT",
-            schema: "public",
-            table: "messages",
+            event: 'INSERT',
+            schema: 'public',
+            table: 'messages',
           },
           (payload) => {
-            console.log("CHATS REALTIME:", payload.new);
-
-            // Untuk MVP kita reload list.
-            // Nanti bisa dioptimalkan update local state.
-            loadChats();
-          },
+            console.log('CHATS REALTIME:', payload.new)
+            loadChats()
+          }
         )
         .subscribe((status, error) => {
-          console.log("CHATS REALTIME STATUS:", status);
+          console.log('CHATS REALTIME STATUS:', status)
 
           if (error) {
-            console.error("CHATS REALTIME ERROR:", error);
+            console.error('CHATS REALTIME ERROR:', error)
           }
-        });
+        })
 
       return () => {
         supabase.removeChannel(channel).catch((error) => {
-          console.error("REMOVE CHATS CHANNEL:", error);
-        });
-      };
-    }, []),
-  );
+          console.error('REMOVE CHATS CHANNEL:', error)
+        })
+      }
+    }, [])
+  )
 
   function openChat(item: ChatItem) {
     router.push({
-      pathname: "/chat/[id]",
-
+      pathname: '/chat/[id]',
       params: {
         id: item.conversation_id,
-
         userId: item.other_user_id,
-
-        displayName: item.display_name ?? item.username ?? "Syn User",
+        displayName: item.display_name ?? item.username ?? 'Syn User',
       },
-    });
+    })
   }
 
   if (loading) {
     return (
-      <View
-        style={{
-          flex: 1,
-
-          justifyContent: "center",
-
-          alignItems: "center",
-
-          backgroundColor: Colors.background,
-        }}
-      >
+      <View style={styles.loadingScreen}>
         <ActivityIndicator color={Colors.primary} />
       </View>
-    );
+    )
   }
 
   return (
-    <View
-      style={{
-        flex: 1,
+    <View style={styles.screen}>
+      <View style={styles.header}>
+        <Text style={styles.title}>chats</Text>
 
-        backgroundColor: Colors.background,
-      }}
-    >
-      {/* Header */}
-
-      <View
-        style={{
-          paddingTop: 56,
-
-          paddingHorizontal: 20,
-
-          paddingBottom: 18,
-
-          backgroundColor: Colors.surface,
-
-          borderBottomWidth: 1,
-
-          borderBottomColor: Colors.border,
-        }}
-      >
-        <Text
-          style={{
-            fontSize: 28,
-
-            fontWeight: "800",
-
-            color: Colors.ink,
-          }}
-        >
-          Chats
-        </Text>
+        <View style={styles.headerAction}>
+          <Ionicons
+            name="search-outline"
+            size={18}
+            color={Colors.muted}
+          />
+        </View>
       </View>
-
-      {/* List */}
 
       <FlatList
         data={chats}
@@ -180,234 +126,193 @@ export default function ChatsScreen() {
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
+            tintColor={Colors.primary}
             onRefresh={() => {
-              setRefreshing(true);
-
-              loadChats();
+              setRefreshing(true)
+              loadChats()
             }}
           />
         }
-        contentContainerStyle={{
-          flexGrow: 1,
-
-          paddingBottom: 100,
-        }}
+        contentContainerStyle={styles.listContent}
         ListEmptyComponent={
-          <View
-            style={{
-              flex: 1,
-
-              justifyContent: "center",
-
-              alignItems: "center",
-
-              padding: 40,
-            }}
-          >
-            <Ionicons
-              name="chatbubble-outline"
-              size={48}
-              color={Colors.muted}
-            />
-
-            <Text
-              style={{
-                marginTop: 16,
-
-                fontSize: 18,
-
-                fontWeight: "700",
-
-                color: Colors.ink,
-              }}
-            >
-              No chats yet
-            </Text>
-
-            <Text
-              style={{
-                marginTop: 7,
-
-                textAlign: "center",
-
-                lineHeight: 20,
-
-                color: Colors.muted,
-              }}
-            >
-              Add a Syn and start a conversation.
-            </Text>
-          </View>
+          <SynEmptyState
+            icon="chatbubble-outline"
+            title="No chats yet"
+            body="Add a Syn and start a conversation."
+          />
         }
-        renderItem={({ item }) => (
-          <Pressable
-            onPress={() => openChat(item)}
-            style={({ pressed }) => ({
-              flexDirection: "row",
+        renderItem={({ item }) => {
+          const unread = item.unread_count > 0
+          const name = item.display_name ?? item.username ?? 'Syn User'
 
-              alignItems: "center",
-
-              paddingHorizontal: 18,
-
-              paddingVertical: 14,
-
-              backgroundColor: Colors.surface,
-
-              borderBottomWidth: 1,
-
-              borderBottomColor: Colors.border,
-
-              opacity: pressed ? 0.65 : 1,
-            })}
-          >
-            {/* Avatar */}
-
-            <View
-              style={{
-                width: 54,
-
-                height: 54,
-
-                borderRadius: 27,
-
-                backgroundColor: "#FFF1EB",
-
-                justifyContent: "center",
-
-                alignItems: "center",
-
-                marginRight: 14,
-              }}
+          return (
+            <Pressable
+              onPress={() => openChat(item)}
+              style={({ pressed }) => [
+                styles.row,
+                pressed && styles.pressed,
+              ]}
             >
-              <Ionicons name="person" size={26} color={Colors.primary} />
-            </View>
+              <SynAvatar
+                name={name}
+                uri={item.avatar_url}
+                size={48}
+              />
 
-            {/* Content */}
-
-            <View
-              style={{
-                flex: 1,
-              }}
-            >
-              <View
-                style={{
-                  flexDirection: "row",
-
-                  alignItems: "center",
-                }}
-              >
-                <Text
-                  numberOfLines={1}
-                  style={{
-                    flex: 1,
-
-                    fontSize: 16,
-
-                    fontWeight: item.unread_count > 0 ? "800" : "700",
-
-                    color: Colors.ink,
-                  }}
-                >
-                  {item.display_name ?? item.username ?? "Syn User"}
-                </Text>
-
-                {item.last_message_at && (
+              <View style={styles.rowBody}>
+                <View style={styles.rowTop}>
                   <Text
-                    style={{
-                      marginLeft: 8,
-
-                      fontSize: 11,
-
-                      color: Colors.muted,
-                    }}
+                    numberOfLines={1}
+                    style={[
+                      styles.name,
+                      unread && styles.nameUnread,
+                    ]}
                   >
-                    {formatTime(item.last_message_at)}
+                    {name}
                   </Text>
-                )}
-              </View>
 
-              <View
-                style={{
-                  marginTop: 5,
-
-                  flexDirection: "row",
-
-                  alignItems: "center",
-                }}
-              >
-                <Text
-                  numberOfLines={1}
-                  style={{
-                    flex: 1,
-
-                    fontSize: 13,
-
-                    fontWeight: item.unread_count > 0 ? "700" : "400",
-
-                    color: item.unread_count > 0 ? Colors.ink : Colors.muted,
-                  }}
-                >
-                  {item.last_message ?? "Start a conversation"}
-                </Text>
-
-                {item.unread_count > 0 && (
-                  <View
-                    style={{
-                      minWidth: 22,
-
-                      height: 22,
-
-                      paddingHorizontal: 6,
-
-                      marginLeft: 8,
-
-                      borderRadius: 11,
-
-                      justifyContent: "center",
-
-                      alignItems: "center",
-
-                      backgroundColor: Colors.primary,
-                    }}
-                  >
+                  {item.last_message_at && (
                     <Text
-                      style={{
-                        color: "#FFFFFF",
-
-                        fontSize: 11,
-
-                        fontWeight: "800",
-                      }}
+                      style={[
+                        styles.time,
+                        unread && styles.timeUnread,
+                      ]}
                     >
-                      {item.unread_count > 99 ? "99+" : item.unread_count}
+                      {formatTime(item.last_message_at)}
                     </Text>
-                  </View>
-                )}
+                  )}
+                </View>
+
+                <View style={styles.rowBottom}>
+                  <Text
+                    numberOfLines={1}
+                    style={[
+                      styles.message,
+                      unread && styles.messageUnread,
+                    ]}
+                  >
+                    {item.last_message ?? 'Start a conversation'}
+                  </Text>
+
+                  {unread && (
+                    <SynBadge
+                      label={item.unread_count > 99 ? '99+' : item.unread_count}
+                    />
+                  )}
+                </View>
               </View>
-            </View>
-          </Pressable>
-        )}
+            </Pressable>
+          )
+        }}
       />
     </View>
-  );
+  )
 }
 
 function formatTime(dateValue: string) {
-  const date = new Date(dateValue);
+  const date = new Date(dateValue)
+  const now = new Date()
 
-  const now = new Date();
-
-  const sameDay = date.toDateString() === now.toDateString();
-
-  if (sameDay) {
+  if (date.toDateString() === now.toDateString()) {
     return date.toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+      hour: '2-digit',
+      minute: '2-digit',
+    })
   }
 
   return date.toLocaleDateString([], {
-    day: "2-digit",
-    month: "2-digit",
-  });
+    day: '2-digit',
+    month: '2-digit',
+  })
 }
+
+const styles = StyleSheet.create({
+  loadingScreen: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.background,
+  },
+  screen: {
+    flex: 1,
+    backgroundColor: Colors.background,
+  },
+  header: {
+    paddingTop: 56,
+    paddingHorizontal: SynSpacing.gutter,
+    paddingBottom: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  title: {
+    color: Colors.ink,
+    fontSize: 24,
+    fontWeight: '800',
+  },
+  headerAction: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.surface,
+  },
+  listContent: {
+    flexGrow: 1,
+    paddingBottom: 100,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingHorizontal: SynSpacing.gutter,
+    paddingVertical: 13,
+    marginBottom: 1,
+    backgroundColor: Colors.surface,
+  },
+  pressed: {
+    opacity: 0.65,
+  },
+  rowBody: {
+    flex: 1,
+    minWidth: 0,
+  },
+  rowTop: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+  },
+  name: {
+    flex: 1,
+    color: Colors.ink,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  nameUnread: {
+    fontWeight: '800',
+  },
+  time: {
+    marginLeft: 8,
+    color: Colors.muted,
+    fontSize: 11,
+  },
+  timeUnread: {
+    color: Colors.primary,
+    fontWeight: '700',
+  },
+  rowBottom: {
+    marginTop: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  message: {
+    flex: 1,
+    color: Colors.muted,
+    fontSize: 13,
+  },
+  messageUnread: {
+    color: Colors.ink,
+    fontWeight: '700',
+  },
+})

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "237138603117",
+    "project_id": "syn-project-91756",
+    "storage_bucket": "syn-project-91756.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:237138603117:android:0357d3b2f1d08fd1b86364",
+        "android_client_info": {
+          "package_name": "com.sinergikarya.syn"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAFknYsGS_9kYJ46lQ2PHe0Bfqn54_glrQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

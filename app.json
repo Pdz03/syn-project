@@ -18,7 +18,9 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "softwareKeyboardLayoutMode": "resize"
+      "softwareKeyboardLayoutMode": "resize",
+      "package": "com.sinergikarya.syn",
+      "googleServicesFile": "./google-services.json"
     },
     "web": {
       "output": "static",
@@ -26,18 +28,26 @@
     },
     "plugins": [
       "expo-router",
+      "expo-notifications",
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
-          "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76
+          "backgroundColor": "#FF6B35",
+          "image": "./assets/images/syn-splash.png",
+          "imageWidth": 140
         }
       ]
     ],
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "a176d469-45fd-4275-b93e-5aa42663fe10"
+      }
+    },
+    "owner": "sinergi-karya"
   }
 }

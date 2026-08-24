@@ -1,118 +1,131 @@
+import { useEffect, useRef, useState } from 'react'
+
 import {
-    ActivityIndicator,
-    Alert,
-    FlatList,
-    KeyboardAvoidingView,
-    Platform,
-    Pressable,
-    Text,
-    TextInput,
-    View,
-} from "react-native";
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native'
 
-import { router, useLocalSearchParams } from "expo-router";
+import { Ionicons } from '@expo/vector-icons'
+import { router, useLocalSearchParams } from 'expo-router'
 
-import { Ionicons } from "@expo/vector-icons";
-
-import { useEffect, useRef, useState } from "react";
-
-import { Colors } from "@/constants/colors";
-import { supabase } from "@/lib/supabase";
-import { useAuth } from "@/providers/auth-provider";
+import { Colors, SynSpacing } from '@/constants/colors'
+import { SynAvatar, SynEmptyState } from '@/components/syn-ui'
+import { supabase } from '@/lib/supabase'
+import { useAuth } from '@/providers/auth-provider'
 
 type Message = {
-  id: string;
-  conversation_id: string;
-  sender_id: string | null;
-  type: "text" | "image" | "nudge" | "system";
-  content: string | null;
-  created_at: string;
-};
+  id: string
+  conversation_id: string
+  sender_id: string | null
+  type: 'text' | 'image' | 'nudge' | 'system'
+  content: string | null
+  created_at: string
+  localStatus?: 'pending' | 'sent'
+}
 
 export default function ChatScreen() {
   const { id, displayName } = useLocalSearchParams<{
-    id: string;
-    userId?: string;
-    displayName?: string;
-  }>();
+    id: string
+    userId?: string
+    displayName?: string
+  }>()
 
-  const listRef = useRef<FlatList<Message>>(null);
+  const listRef = useRef<FlatList<Message>>(null)
+  const { user } = useAuth()
 
-  const { user } = useAuth();
-
-  const [messages, setMessages] = useState<Message[]>([]);
-
-  const [text, setText] = useState("");
-
-  const [loading, setLoading] = useState(true);
-
-  const [sending, setSending] = useState(false);
+  const [messages, setMessages] = useState<Message[]>([])
+  const [text, setText] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [sending, setSending] = useState(false)
 
   useEffect(() => {
-    if (!id) return;
+    if (!id) return
 
-    loadMessages();
-    markAsRead();
+    loadMessages()
+    markAsRead()
 
-    const channelName = `chat:${id}:${Date.now()}`;
+    const channelName = `chat:${id}:${Date.now()}`
 
-    console.log("SUBSCRIBE CHANNEL:", channelName);
+    console.log('SUBSCRIBE CHANNEL:', channelName)
 
     const channel = supabase
       .channel(channelName)
       .on(
-        "postgres_changes",
+        'postgres_changes',
         {
-          event: "INSERT",
-          schema: "public",
-          table: "messages",
+          event: 'INSERT',
+          schema: 'public',
+          table: 'messages',
           filter: `conversation_id=eq.${id}`,
         },
         (payload) => {
-          console.log("REALTIME MESSAGE:", payload.new);
+          console.log('REALTIME MESSAGE:', payload.new)
 
-          const newMessage = payload.new as Message;
+          const newMessage = payload.new as Message
 
           if (newMessage.sender_id !== user?.id) {
-            markAsRead();
+            markAsRead()
           }
 
           setMessages((current) => {
             const alreadyExists = current.some(
-              (message) => message.id === newMessage.id,
-            );
+              (message) => message.id === newMessage.id
+            )
 
             if (alreadyExists) {
-              return current;
+              return current
             }
 
-            return [...current, newMessage];
-          });
-        },
+            const pendingIndex = current.findIndex(
+              (message) =>
+                message.id.startsWith('local-') &&
+                message.sender_id === newMessage.sender_id &&
+                message.content === newMessage.content
+            )
+
+            if (pendingIndex >= 0) {
+              return current.map((message, index) =>
+                index === pendingIndex
+                  ? { ...newMessage, localStatus: 'sent' }
+                  : message
+              )
+            }
+
+            return [...current, newMessage]
+          })
+        }
       )
       .subscribe((status, error) => {
-        console.log("REALTIME STATUS:", status);
+        console.log('REALTIME STATUS:', status)
 
         if (error) {
-          console.error("REALTIME ERROR:", error);
+          console.error('REALTIME ERROR:', error)
         }
-      });
+      })
 
     return () => {
-      console.log("REMOVE CHANNEL:", channelName);
+      console.log('REMOVE CHANNEL:', channelName)
 
       supabase.removeChannel(channel).catch((error) => {
-        console.error("REMOVE CHANNEL ERROR:", error);
-      });
-    };
-  }, [id]);
+        console.error('REMOVE CHANNEL ERROR:', error)
+      })
+    }
+  }, [id])
 
   async function loadMessages() {
     try {
-      setLoading(true);
+      setLoading(true)
 
       const { data, error } = await supabase
-        .from("messages")
+        .from('messages')
         .select(
           `
           id,
@@ -121,200 +134,168 @@ export default function ChatScreen() {
           type,
           content,
           created_at
-        `,
+        `
         )
-        .eq("conversation_id", id)
-        .order("created_at", {
+        .eq('conversation_id', id)
+        .order('created_at', {
           ascending: true,
-        });
+        })
 
       if (error) {
-        console.error("LOAD MESSAGES:", error);
-
-        return;
+        console.error('LOAD MESSAGES:', error)
+        return
       }
 
-      setMessages((data ?? []) as Message[]);
+      setMessages((data ?? []) as Message[])
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
   }
 
   async function handleSend() {
-    const message = text.trim();
+    const message = text.trim()
 
     if (!message || !id || sending) {
-      return;
+      return
     }
 
+    const localId = `local-${Date.now()}`
+
     try {
-      setSending(true);
+      setSending(true)
+      setText('')
+      setMessages((current) => [
+        ...current,
+        {
+          id: localId,
+          conversation_id: id,
+          sender_id: user?.id ?? null,
+          type: 'text',
+          content: message,
+          created_at: new Date().toISOString(),
+          localStatus: 'pending',
+        },
+      ])
 
-      setText("");
-
-      const { error } = await supabase.rpc("send_message", {
+      const { error } = await supabase.rpc('send_message', {
         target_conversation_id: id,
-
         message_content: message,
-
         reply_message_id: null,
-      });
+      })
 
       if (error) {
-        console.error("SEND MESSAGE:", error);
-
-        // Restore text
-        setText(message);
+        console.error('SEND MESSAGE:', error)
+        setMessages((current) => current.filter((item) => item.id !== localId))
+        setText(message)
+        return
       }
+
+      setMessages((current) =>
+        current.map((item) =>
+          item.id === localId ? { ...item, localStatus: 'sent' } : item
+        )
+      )
     } finally {
-      setSending(false);
+      setSending(false)
     }
   }
 
   async function handleNudge() {
-    if (!id) return;
+    if (!id) return
 
     try {
-      const { error } = await supabase.rpc("send_nudge", {
+      const { error } = await supabase.rpc('send_nudge', {
         target_conversation_id: id,
-      });
+      })
 
       if (error) {
-        console.error("NUDGE ERROR:", error);
+        console.error('NUDGE ERROR:', error)
 
-        const message = error.message.toLowerCase();
+        const message = error.message.toLowerCase()
 
         if (
-          message.includes("rate") ||
-          message.includes("limit") ||
-          message.includes("nudge")
+          message.includes('rate') ||
+          message.includes('limit') ||
+          message.includes('nudge')
         ) {
-          Alert.alert(
-            "Easy there 👋",
-            "Terlalu banyak Nudge. Coba lagi sebentar.",
-          );
+          Alert.alert('Easy there', 'Terlalu banyak Nudge. Coba lagi sebentar.')
         } else {
-          Alert.alert("Nudge failed", error.message);
+          Alert.alert('Nudge failed', error.message)
         }
 
-        return;
+        return
       }
     } catch (error) {
-      console.error("NUDGE CATCH:", error);
+      console.error('NUDGE CATCH:', error)
     }
   }
 
   async function markAsRead() {
-    if (!id) return;
+    if (!id) return
 
-    const { error } = await supabase.rpc("mark_conversation_read", {
+    const { error } = await supabase.rpc('mark_conversation_read', {
       target_conversation_id: id,
-    });
+    })
 
     if (error) {
-      console.error("MARK READ:", error);
+      console.error('MARK READ:', error)
     }
   }
 
+  const chatName = displayName ?? 'Syn'
+
   return (
     <KeyboardAvoidingView
-      style={{
-        flex: 1,
-        backgroundColor: Colors.background,
-      }}
-      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      style={styles.screen}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={0}
     >
-      {/* Header */}
-
-      <View
-        style={{
-          paddingTop: 54,
-          paddingHorizontal: 16,
-          paddingBottom: 14,
-
-          flexDirection: "row",
-          alignItems: "center",
-
-          backgroundColor: Colors.surface,
-
-          borderBottomWidth: 1,
-          borderBottomColor: Colors.border,
-        }}
-      >
-        <Pressable onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color={Colors.ink} />
+      <View style={styles.header}>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => router.back()}
+          style={styles.backButton}
+        >
+          <Ionicons
+            name="arrow-back"
+            size={23}
+            color={Colors.ink}
+          />
         </Pressable>
 
-        <View
-          style={{
-            marginLeft: 14,
-            flex: 1,
-          }}
-        >
-          <Text
-            style={{
-              fontSize: 17,
-              fontWeight: "700",
-              color: Colors.ink,
-            }}
-          >
-            {displayName ?? "Syn"}
-          </Text>
+        <SynAvatar
+          name={chatName}
+          size={38}
+        />
 
+        <View style={styles.headerText}>
           <Text
-            style={{
-              marginTop: 2,
-              fontSize: 12,
-              color: Colors.muted,
-            }}
+            numberOfLines={1}
+            style={styles.headerTitle}
           >
-            Syn
+            {chatName}
           </Text>
+          <Text style={styles.headerSubtitle}>Syn</Text>
         </View>
 
         <Pressable
+          accessibilityRole="button"
           onPress={handleNudge}
-          style={({ pressed }) => ({
-            width: 40,
-            height: 40,
-            borderRadius: 20,
-
-            justifyContent: "center",
-
-            alignItems: "center",
-
-            backgroundColor: "#FFF1EB",
-
-            transform: [
-              {
-                scale: pressed ? 0.9 : 1,
-              },
-            ],
-          })}
+          style={({ pressed }) => [
+            styles.nudgeButton,
+            pressed && styles.nudgePressed,
+          ]}
         >
-          <Text
-            style={{
-              fontSize: 19,
-            }}
-          >
-            👋
-          </Text>
+          <Ionicons
+            name="hand-left-outline"
+            size={20}
+            color={Colors.primary}
+          />
         </Pressable>
       </View>
 
-      {/* Messages */}
-
       {loading ? (
-        <View
-          style={{
-            flex: 1,
-
-            justifyContent: "center",
-
-            alignItems: "center",
-          }}
-        >
+        <View style={styles.loadingWrap}>
           <ActivityIndicator color={Colors.primary} />
         </View>
       ) : (
@@ -323,150 +304,340 @@ export default function ChatScreen() {
           onContentSizeChange={() => {
             listRef.current?.scrollToEnd({
               animated: true,
-            });
+            })
           }}
           onLayout={() => {
             listRef.current?.scrollToEnd({
               animated: false,
-            });
+            })
           }}
           data={messages}
           keyExtractor={(item) => item.id}
-          contentContainerStyle={{
-            padding: 16,
-            paddingBottom: 20,
-          }}
-          renderItem={({ item }) => {
-            const mine = item.sender_id === user?.id;
+          contentContainerStyle={[
+            styles.messageList,
+            messages.length === 0 && styles.emptyList,
+          ]}
+          ListEmptyComponent={
+            <SynEmptyState
+              icon="chatbubble-outline"
+              title="No messages yet"
+              body="Send a message or a Nudge to start."
+            />
+          }
+          renderItem={({ item, index }) => {
+            const mine = item.sender_id === user?.id
+            const previous = messages[index - 1]
+            const showDate = !previous || !isSameDay(previous.created_at, item.created_at)
 
-            if (item.type === "nudge") {
+            if (item.type === 'nudge') {
               return (
-                <View
-                  style={{
-                    alignItems: "center",
-                    marginVertical: 12,
-                  }}
-                >
-                  <View
-                    style={{
-                      paddingHorizontal: 14,
-                      paddingVertical: 8,
-                      borderRadius: 16,
-                      backgroundColor: "#FFF1EB",
-                    }}
-                  >
-                    <Text
-                      style={{
-                        color: Colors.primary,
-                        fontSize: 13,
-                        fontWeight: "700",
-                      }}
-                    >
-                      {mine ? "You sent a Nudge 👋" : "You got a Nudge 👋"}
-                    </Text>
+                <>
+                  {showDate && <DateSeparator dateValue={item.created_at} />}
+
+                  <View style={styles.nudgeRow}>
+                    <View style={styles.nudgePill}>
+                      <Ionicons
+                        name="hand-left-outline"
+                        size={14}
+                        color={Colors.primary}
+                      />
+                      <Text style={styles.nudgeText}>
+                        {mine ? 'You sent a Nudge' : 'You got a Nudge'}
+                      </Text>
+                      <Text style={styles.nudgeTime}>{formatMessageTime(item.created_at)}</Text>
+                    </View>
                   </View>
-                </View>
-              );
+                </>
+              )
             }
 
             return (
-              <View
-                style={{
-                  alignSelf: mine ? "flex-end" : "flex-start",
+              <>
+                {showDate && <DateSeparator dateValue={item.created_at} />}
 
-                  maxWidth: "78%",
-
-                  marginBottom: 8,
-
-                  paddingHorizontal: 14,
-
-                  paddingVertical: 10,
-
-                  borderRadius: 18,
-
-                  backgroundColor: mine ? Colors.primary : Colors.surface,
-
-                  borderWidth: mine ? 0 : 1,
-
-                  borderColor: Colors.border,
-                }}
-              >
-                <Text
-                  style={{
-                    color: mine ? "#FFFFFF" : Colors.ink,
-
-                    fontSize: 15,
-                  }}
+                <View
+                  style={[
+                    styles.bubble,
+                    mine ? styles.bubbleMine : styles.bubbleOther,
+                  ]}
                 >
-                  {item.content}
-                </Text>
-              </View>
-            );
+                  <Text
+                    style={[
+                      styles.bubbleText,
+                      mine ? styles.bubbleTextMine : styles.bubbleTextOther,
+                    ]}
+                  >
+                    {item.content}
+                  </Text>
+
+                  <View style={styles.metaRow}>
+                    <Text
+                      style={[
+                        styles.metaText,
+                        mine ? styles.metaTextMine : styles.metaTextOther,
+                      ]}
+                    >
+                      {formatMessageTime(item.created_at)}
+                    </Text>
+                    {mine && <MessageStatus status={item.localStatus} />}
+                  </View>
+                </View>
+              </>
+            )
           }}
         />
       )}
 
-      {/* Composer */}
-
-      <View
-        style={{
-          paddingHorizontal: 12,
-          paddingTop: 10,
-          paddingBottom: 18,
-
-          flexDirection: "row",
-          alignItems: "flex-end",
-
-          backgroundColor: Colors.surface,
-
-          borderTopWidth: 1,
-          borderTopColor: Colors.border,
-        }}
-      >
+      <View style={styles.composer}>
         <TextInput
           value={text}
           onChangeText={setText}
           placeholder="Message..."
+          placeholderTextColor={Colors.muted}
           multiline
-          style={{
-            flex: 1,
-
-            maxHeight: 110,
-
-            paddingHorizontal: 16,
-            paddingVertical: 11,
-
-            borderRadius: 22,
-
-            backgroundColor: Colors.background,
-
-            color: Colors.ink,
-          }}
+          style={styles.input}
         />
 
         <Pressable
+          accessibilityRole="button"
           onPress={handleSend}
           disabled={sending || !text.trim()}
-          style={{
-            width: 44,
-            height: 44,
-
-            marginLeft: 8,
-
-            borderRadius: 22,
-
-            justifyContent: "center",
-
-            alignItems: "center",
-
-            backgroundColor: Colors.primary,
-
-            opacity: sending || !text.trim() ? 0.45 : 1,
-          }}
+          style={[
+            styles.sendButton,
+            (sending || !text.trim()) && styles.sendButtonDisabled,
+          ]}
         >
-          <Ionicons name="send" size={19} color="#FFFFFF" />
+          <Ionicons
+            name="send"
+            size={18}
+            color="#FFFFFF"
+          />
         </Pressable>
       </View>
     </KeyboardAvoidingView>
-  );
+  )
 }
+
+function DateSeparator({ dateValue }: { dateValue: string }) {
+  return (
+    <View style={styles.dateSeparator}>
+      <Text style={styles.dateSeparatorText}>{formatDateLabel(dateValue)}</Text>
+    </View>
+  )
+}
+
+function MessageStatus({ status }: { status?: Message['localStatus'] }) {
+  return (
+    <Ionicons
+      name={status === 'pending' ? 'time-outline' : 'checkmark'}
+      size={12}
+      color="#FFFFFF"
+      style={styles.metaStatus}
+    />
+  )
+}
+
+function isSameDay(a: string, b: string) {
+  return new Date(a).toDateString() === new Date(b).toDateString()
+}
+
+function formatMessageTime(dateValue: string) {
+  return new Date(dateValue).toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+function formatDateLabel(dateValue: string) {
+  const date = new Date(dateValue)
+  const now = new Date()
+
+  if (date.toDateString() === now.toDateString()) return 'Today'
+
+  const yesterday = new Date(now)
+  yesterday.setDate(now.getDate() - 1)
+  if (date.toDateString() === yesterday.toDateString()) return 'Yesterday'
+
+  return date.toLocaleDateString([], {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  })
+}
+
+const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: Colors.background,
+  },
+  header: {
+    paddingTop: 54,
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: Colors.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.border,
+  },
+  backButton: {
+    padding: 4,
+  },
+  headerText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  headerTitle: {
+    color: Colors.ink,
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  headerSubtitle: {
+    marginTop: 2,
+    color: Colors.muted,
+    fontSize: 12,
+  },
+  nudgeButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.primaryTint,
+  },
+  nudgePressed: {
+    transform: [{ scale: 0.94 }],
+  },
+  loadingWrap: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  messageList: {
+    paddingHorizontal: SynSpacing.lg,
+    paddingVertical: SynSpacing.lg,
+    paddingBottom: 20,
+  },
+  emptyList: {
+    flexGrow: 1,
+  },
+  nudgeRow: {
+    alignItems: 'center',
+    marginVertical: 12,
+  },
+  nudgePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: Colors.primaryTint,
+  },
+  nudgeText: {
+    color: Colors.primary,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  nudgeTime: {
+    color: Colors.primary,
+    fontSize: 11,
+    opacity: 0.72,
+  },
+  dateSeparator: {
+    alignItems: 'center',
+    marginTop: 4,
+    marginBottom: 14,
+  },
+  dateSeparatorText: {
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 999,
+    overflow: 'hidden',
+    color: Colors.muted,
+    fontSize: 11,
+    fontWeight: '700',
+    backgroundColor: Colors.surface,
+  },
+  bubble: {
+    maxWidth: '78%',
+    marginBottom: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 18,
+  },
+  bubbleMine: {
+    alignSelf: 'flex-end',
+    borderBottomRightRadius: 6,
+    backgroundColor: Colors.primary,
+  },
+  bubbleOther: {
+    alignSelf: 'flex-start',
+    borderBottomLeftRadius: 6,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
+  },
+  bubbleText: {
+    fontSize: 15,
+    lineHeight: 21,
+  },
+  bubbleTextMine: {
+    color: '#FFFFFF',
+  },
+  bubbleTextOther: {
+    color: Colors.ink,
+  },
+  metaRow: {
+    marginTop: 5,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 4,
+  },
+  metaText: {
+    fontSize: 10,
+  },
+  metaTextMine: {
+    color: '#FFFFFF',
+    opacity: 0.78,
+  },
+  metaTextOther: {
+    color: Colors.muted,
+  },
+  metaStatus: {
+    opacity: 0.9,
+  },
+  composer: {
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    paddingBottom: 18,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 8,
+    backgroundColor: Colors.surface,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
+  },
+  input: {
+    flex: 1,
+    maxHeight: 110,
+    paddingHorizontal: 16,
+    paddingVertical: 11,
+    borderRadius: 22,
+    color: Colors.ink,
+    backgroundColor: Colors.background,
+  },
+  sendButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.primary,
+  },
+  sendButtonDisabled: {
+    opacity: 0.45,
+  },
+})

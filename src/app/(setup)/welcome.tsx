@@ -1,37 +1,22 @@
 import { useState } from 'react'
 
 import {
-  ActivityIndicator,
   Alert,
-  Pressable,
+  StyleSheet,
   Text,
   View,
 } from 'react-native'
 
 import { router } from 'expo-router'
 
-import {
-  supabase,
-} from '@/lib/supabase'
-
-import {
-  useAuth,
-} from '@/providers/auth-provider'
-
-import {
-  Colors,
-} from '@/constants/colors'
+import { Colors, SynSpacing } from '@/constants/colors'
+import { SynAvatar, SynButton, SynCard } from '@/components/syn-ui'
+import { supabase } from '@/lib/supabase'
+import { useAuth } from '@/providers/auth-provider'
 
 export default function WelcomeScreen() {
-  const {
-    profile,
-    refreshProfile,
-  } = useAuth()
-
-  const [
-    loading,
-    setLoading,
-  ] = useState(false)
+  const { profile, refreshProfile } = useAuth()
+  const [loading, setLoading] = useState(false)
 
   async function handleEnterSyn() {
     if (!profile) return
@@ -39,164 +24,130 @@ export default function WelcomeScreen() {
     try {
       setLoading(true)
 
-      const { error } =
-        await supabase
-          .from('profiles')
-          .update({
-            onboarding_completed:
-              true,
-          })
-          .eq('id', profile.id)
+      const { error } = await supabase
+        .from('profiles')
+        .update({
+          onboarding_completed: true,
+        })
+        .eq('id', profile.id)
 
       if (error) {
-        console.error(
-          'ONBOARDING ERROR:',
-          error
-        )
-
-        Alert.alert(
-          'Error',
-          'Gagal menyelesaikan onboarding.'
-        )
-
+        console.error('ONBOARDING ERROR:', error)
+        Alert.alert('Error', 'Gagal menyelesaikan onboarding.')
         return
       }
 
       await refreshProfile()
-
       router.replace('/(tabs)')
     } finally {
       setLoading(false)
     }
   }
 
+  const displayName = profile?.display_name ?? 'Syn User'
+
   return (
-    <View
-      style={{
-        flex: 1,
-        justifyContent:
-          'center',
+    <View style={styles.screen}>
+      <View style={styles.center}>
+        <SynAvatar
+          name={displayName}
+          uri={profile?.avatar_url}
+          size={80}
+        />
 
-        padding: 24,
+        <Text style={styles.kicker}>welcome to syn,</Text>
+        <Text style={styles.title}>{displayName}</Text>
 
-        backgroundColor:
-          Colors.background,
-      }}
-    >
-      <Text
-        style={{
-          fontSize: 42,
-          fontWeight: '800',
-          color:
-            Colors.primary,
-        }}
-      >
-        syn
-      </Text>
+        <SynCard style={styles.idCard}>
+          <Text style={styles.idLabel}>your syn id</Text>
+          <Text style={styles.synId}>{profile?.syn_id}</Text>
+          <Text style={styles.idBody}>
+            this is your permanent identity on syn. share it to connect with people you know.
+          </Text>
 
-      <Text
-        style={{
-          marginTop: 32,
-          fontSize: 30,
-          fontWeight: '800',
-          color: Colors.ink,
-        }}
-      >
-        Welcome to Syn 👋
-      </Text>
+          <View style={styles.cardDivider} />
 
-      <Text
-        style={{
-          marginTop: 10,
-          color: Colors.muted,
-          fontSize: 16,
-        }}
-      >
-        Your account is ready.
-      </Text>
-
-      <View
-        style={{
-          marginTop: 40,
-          padding: 24,
-          borderRadius: 20,
-          backgroundColor:
-            Colors.surface,
-
-          borderWidth: 1,
-          borderColor:
-            Colors.border,
-        }}
-      >
-        <Text
-          style={{
-            color: Colors.muted,
-            fontSize: 13,
-            fontWeight: '600',
-          }}
-        >
-          YOUR SYN ID
-        </Text>
-
-        <Text
-          style={{
-            marginTop: 10,
-            fontSize: 30,
-            fontWeight: '800',
-            letterSpacing: 2,
-            color: Colors.ink,
-          }}
-        >
-          {profile?.syn_id}
-        </Text>
-
-        <Text
-          style={{
-            marginTop: 12,
-            lineHeight: 20,
-            color: Colors.muted,
-          }}
-        >
-          This is your permanent
-          Syn ID. Share it with
-          people you want to
-          connect with.
-        </Text>
+          <Text style={styles.cardHint}>
+            add your syns using their id or syn code. no public followers, no strangers.
+          </Text>
+        </SynCard>
       </View>
 
-      <Pressable
-        onPress={
-          handleEnterSyn
-        }
-        disabled={loading}
-        style={{
-          marginTop: 32,
-          paddingVertical: 16,
-          alignItems: 'center',
-          borderRadius: 14,
-          backgroundColor:
-            Colors.primary,
-
-          opacity:
-            loading ? 0.6 : 1,
-        }}
-      >
-        {loading ? (
-          <ActivityIndicator
-            color="#fff"
-          />
-        ) : (
-          <Text
-            style={{
-              color: '#fff',
-              fontSize: 16,
-              fontWeight: '700',
-            }}
-          >
-            Enter Syn
-          </Text>
-        )}
-      </Pressable>
+      <View style={styles.footer}>
+        <SynButton
+          title="go to syn"
+          loading={loading}
+          onPress={handleEnterSyn}
+        />
+      </View>
     </View>
   )
 }
+
+const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: Colors.background,
+  },
+  center: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: SynSpacing.xxl,
+  },
+  kicker: {
+    marginTop: 16,
+    color: Colors.muted,
+    fontSize: 14,
+  },
+  title: {
+    marginTop: 4,
+    marginBottom: 30,
+    color: Colors.ink,
+    fontSize: 30,
+    fontWeight: '800',
+    lineHeight: 34,
+    textAlign: 'center',
+  },
+  idCard: {
+    width: '100%',
+    paddingHorizontal: 24,
+    paddingVertical: 22,
+  },
+  idLabel: {
+    color: Colors.muted,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+  },
+  synId: {
+    marginTop: 8,
+    color: Colors.secondary,
+    fontSize: 30,
+    fontWeight: '800',
+    letterSpacing: 1.4,
+  },
+  idBody: {
+    marginTop: 10,
+    color: Colors.muted,
+    fontSize: 13,
+    lineHeight: 21,
+  },
+  cardDivider: {
+    height: 1,
+    marginTop: 16,
+    marginBottom: 14,
+    backgroundColor: Colors.border,
+  },
+  cardHint: {
+    color: Colors.secondary,
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 19,
+  },
+  footer: {
+    paddingHorizontal: SynSpacing.xxl,
+    paddingBottom: 36,
+  },
+})
