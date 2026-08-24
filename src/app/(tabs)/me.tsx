@@ -11,9 +11,10 @@ import { router } from 'expo-router'
 import { useAuth } from '@/providers/auth-provider'
 import { supabase } from '@/lib/supabase'
 import { Colors } from '@/constants/colors'
+import { checkForAppUpdate } from '@/lib/app-updates'
 
 export default function MeScreen() {
-  const { profile } = useAuth()
+  const { profile, user } = useAuth()
 
   async function handleLogout() {
     Alert.alert(
@@ -188,6 +189,16 @@ export default function MeScreen() {
             title="Settings"
             onPress={() =>
               console.log('SETTINGS')
+            }
+          />
+
+          <MenuItem
+            icon="cloud-download-outline"
+            title="Check for updates"
+            onPress={() =>
+              checkForAppUpdate({
+                userId: user?.id,
+              })
             }
           />
         </View>

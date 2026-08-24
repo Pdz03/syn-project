@@ -13,6 +13,7 @@ import { useState, useEffect } from 'react'
 import SynActionSheet from '@/components/SynActionSheet'
 import { registerForPushNotifications }
   from '@/lib/notifications'
+import { checkForAppUpdate } from '@/lib/app-updates'
 
 export default function TabsLayout() {
   const {
@@ -32,6 +33,11 @@ export default function TabsLayout() {
     registerForPushNotifications(
       session.user.id
     )
+
+    checkForAppUpdate({
+      userId: session.user.id,
+      silent: true,
+    })
   }, [session?.user?.id])
 
   if (loading || profileLoading) {

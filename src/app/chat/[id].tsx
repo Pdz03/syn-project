@@ -32,6 +32,8 @@ type Message = {
   type: 'text' | 'image' | 'nudge' | 'system'
   content: string | null
   created_at: string
+  edited_at?: string | null
+  reply_message_id?: string | null
   localStatus?: 'pending' | 'sent'
   receiptStatus?: 'sent' | 'delivered' | 'read'
 }
@@ -76,6 +78,9 @@ export default function ChatScreen() {
   const [chatProfile, setChatProfile] = useState<ChatProfile | null>(null)
   const [imageUrls, setImageUrls] = useState<Record<string, string>>({})
   const [reactions, setReactions] = useState<Reaction[]>([])
+  const [replyTo, setReplyTo] = useState<Message | null>(null)
+  const [editingMessage, setEditingMessage] = useState<Message | null>(null)
+  const [composerError, setComposerError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!id) return
@@ -94,15 +99,47 @@ export default function ChatScreen() {
       .on(
         'postgres_changes',
         {
-          event: 'INSERT',
+          event: '*',
           schema: 'public',
           table: 'messages',
           filter: `conversation_id=eq.${id}`,
         },
         (payload) => {
-          console.log('REALTIME MESSAGE:', payload.new)
+          console.log('REALTIME MESSAGE:', payload)
+
+          if (payload.eventType === 'DELETE') {
+            const oldMessage = payload.old as Message | null
+
+            if (oldMessage?.id) {
+              setMessages((current) =>
+                current.filter((message) => message.id !== oldMessage.id)
+              )
+              setReactions((current) =>
+                current.filter(
+                  (reaction) => reaction.message_id !== oldMessage.id
+                )
+              )
+            }
+
+            return
+          }
 
           const newMessage = payload.new as Message
+
+          if (payload.eventType === 'UPDATE') {
+            setMessages((current) =>
+              current.map((message) =>
+                message.id === newMessage.id
+                  ? {
+                      ...message,
+                      ...newMessage,
+                    }
+                  : message
+              )
+            )
+
+            return
+          }
 
           if (newMessage.sender_id !== user?.id) {
             markAsRead()
@@ -324,7 +361,9 @@ export default function ChatScreen() {
           sender_id,
           type,
           content,
-          created_at
+          created_at,
+          edited_at,
+          reply_message_id
         `
         )
         .eq('conversation_id', id)
@@ -355,9 +394,15 @@ export default function ChatScreen() {
       return
     }
 
+    if (editingMessage) {
+      await editMessage(editingMessage, message)
+      return
+    }
+
     const localId = `local-${Date.now()}`
 
     try {
+      setComposerError(null)
       setSending(true)
       setText('')
       setMessages((current) => [
@@ -371,22 +416,25 @@ export default function ChatScreen() {
           created_at: new Date().toISOString(),
           localStatus: 'pending',
           receiptStatus: 'sent',
+          reply_message_id: replyTo?.id ?? null,
         },
       ])
 
       const { error } = await supabase.rpc('send_message', {
         target_conversation_id: id,
         message_content: message,
-        reply_message_id: null,
+        reply_message_id: replyTo?.id ?? null,
       })
 
       if (error) {
         console.error('SEND MESSAGE:', error)
+        setComposerError('Message failed to send.')
         setMessages((current) => current.filter((item) => item.id !== localId))
         setText(message)
         return
       }
 
+      setReplyTo(null)
       setMessages((current) =>
         current.map((item) =>
           item.id === localId
@@ -457,6 +505,7 @@ export default function ChatScreen() {
     const mediaPath = buildMediaPath(id, user.id, asset.uri)
 
     try {
+      setComposerError(null)
       setUploadingMedia(true)
       setImageUrls((current) => ({
         ...current,
@@ -508,6 +557,7 @@ export default function ChatScreen() {
       )
     } catch (error) {
       console.error('SEND IMAGE:', error)
+      setComposerError('Photo failed to send.')
       setMessages((current) => current.filter((message) => message.id !== localId))
       setImageUrls((current) => {
         const next = { ...current }
@@ -588,6 +638,18 @@ export default function ChatScreen() {
     }))
 
     Alert.alert('Message', undefined, [
+      {
+        text: 'Reply',
+        onPress: () => setReplyTo(message),
+      },
+      ...(message.sender_id === user?.id && message.type === 'text'
+        ? [
+            {
+              text: 'Edit',
+              onPress: () => startEditMessage(message),
+            },
+          ]
+        : []),
       ...reactionButtons,
       ...(message.type === 'text' && message.content
         ? [
@@ -601,11 +663,72 @@ export default function ChatScreen() {
             },
           ]
         : []),
+      ...(message.sender_id === user?.id
+        ? [
+            {
+              text: 'Delete',
+              style: 'destructive' as const,
+              onPress: () => confirmDeleteMessage(message),
+            },
+          ]
+        : []),
       {
         text: 'Cancel',
         style: 'cancel',
       },
     ])
+  }
+
+  function confirmDeleteMessage(message: Message) {
+    Alert.alert('Delete message?', 'This message will be removed from chat.', [
+      {
+        text: 'Cancel',
+        style: 'cancel',
+      },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => deleteMessage(message),
+      },
+    ])
+  }
+
+  async function deleteMessage(message: Message) {
+    if (message.sender_id !== user?.id) {
+      return
+    }
+
+    const { error } = await supabase.rpc('delete_message', {
+      target_message_id: message.id,
+    })
+
+    if (error) {
+      console.warn('DELETE MESSAGE:', error.message)
+      Alert.alert('Delete failed', 'Gagal menghapus pesan.')
+      return
+    }
+
+    if (message.type === 'image' && message.content) {
+      supabase.storage
+        .from('chat-media')
+        .remove([message.content])
+        .then(({ error: removeError }) => {
+          if (removeError) {
+            console.warn('DELETE IMAGE:', removeError.message)
+          }
+        })
+    }
+
+    setMessages((current) =>
+      current.filter((currentMessage) => currentMessage.id !== message.id)
+    )
+    setReactions((current) =>
+      current.filter((reaction) => reaction.message_id !== message.id)
+    )
+
+    if (replyTo?.id === message.id) {
+      setReplyTo(null)
+    }
   }
 
   async function toggleReaction(messageId: string, emoji: string) {
@@ -617,6 +740,53 @@ export default function ChatScreen() {
     if (error) {
       console.warn('TOGGLE REACTION:', error.message)
       Alert.alert('Reaction failed', 'Belum bisa menambahkan reaction.')
+    }
+  }
+
+  function startEditMessage(message: Message) {
+    setReplyTo(null)
+    setComposerError(null)
+    setEditingMessage(message)
+    setText(message.content ?? '')
+  }
+
+  function cancelEdit() {
+    setEditingMessage(null)
+    setText('')
+  }
+
+  async function editMessage(message: Message, nextContent: string) {
+    try {
+      setComposerError(null)
+      setSending(true)
+
+      const { error } = await supabase.rpc('edit_message', {
+        target_message_id: message.id,
+        new_content: nextContent,
+      })
+
+      if (error) {
+        console.warn('EDIT MESSAGE:', error.message)
+        setComposerError('Edit failed.')
+        Alert.alert('Edit failed', 'Gagal mengubah pesan.')
+        return
+      }
+
+      setMessages((current) =>
+        current.map((currentMessage) =>
+          currentMessage.id === message.id
+            ? {
+                ...currentMessage,
+                content: nextContent,
+                edited_at: new Date().toISOString(),
+              }
+            : currentMessage
+        )
+      )
+      setEditingMessage(null)
+      setText('')
+    } finally {
+      setSending(false)
     }
   }
 
@@ -813,6 +983,9 @@ export default function ChatScreen() {
             }
 
             const imageUrl = imageUrls[item.id]
+            const repliedMessage = item.reply_message_id
+              ? messages.find((message) => message.id === item.reply_message_id)
+              : undefined
             const itemReactions = getReactionSummary(
               reactions.filter((reaction) => reaction.message_id === item.id)
             )
@@ -830,6 +1003,13 @@ export default function ChatScreen() {
                   <Pressable
                     onLongPress={() => openMessageActions(item)}
                   >
+                    {item.reply_message_id && (
+                      <ReplyPreview
+                        message={repliedMessage ?? null}
+                        mine={mine}
+                      />
+                    )}
+
                     {item.type === 'image' ? (
                       imageUrl ? (
                         <Image
@@ -864,6 +1044,7 @@ export default function ChatScreen() {
                       ]}
                     >
                       {formatMessageTime(item.created_at)}
+                      {item.edited_at ? ' · edited' : ''}
                     </Text>
                     {mine && (
                       <MessageStatus
@@ -901,13 +1082,70 @@ export default function ChatScreen() {
       )}
 
       <View style={styles.composer}>
+        {composerError && (
+          <Text style={styles.composerError}>{composerError}</Text>
+        )}
+
+        {editingMessage && (
+          <View style={styles.replyComposer}>
+            <View style={styles.replyComposerText}>
+              <Text style={styles.replyComposerLabel}>Editing message</Text>
+              <Text
+                numberOfLines={1}
+                style={styles.replyComposerBody}
+              >
+                {editingMessage.content}
+              </Text>
+            </View>
+
+            <Pressable
+              accessibilityRole="button"
+              onPress={cancelEdit}
+              style={styles.replyClose}
+            >
+              <Ionicons
+                name="close"
+                size={18}
+                color={Colors.muted}
+              />
+            </Pressable>
+          </View>
+        )}
+
+        {replyTo && (
+          <View style={styles.replyComposer}>
+            <View style={styles.replyComposerText}>
+              <Text style={styles.replyComposerLabel}>Replying to</Text>
+              <Text
+                numberOfLines={1}
+                style={styles.replyComposerBody}
+              >
+                {getReplyText(replyTo)}
+              </Text>
+            </View>
+
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setReplyTo(null)}
+              style={styles.replyClose}
+            >
+              <Ionicons
+                name="close"
+                size={18}
+                color={Colors.muted}
+              />
+            </Pressable>
+          </View>
+        )}
+
+        <View style={styles.composerRow}>
         <Pressable
           accessibilityRole="button"
           onPress={handlePickImage}
-          disabled={uploadingMedia}
+          disabled={uploadingMedia || Boolean(editingMessage)}
           style={[
             styles.mediaButton,
-            uploadingMedia && styles.sendButtonDisabled,
+            (uploadingMedia || editingMessage) && styles.sendButtonDisabled,
           ]}
         >
           {uploadingMedia ? (
@@ -927,10 +1165,10 @@ export default function ChatScreen() {
         <Pressable
           accessibilityRole="button"
           onPress={handleTakePhoto}
-          disabled={uploadingMedia}
+          disabled={uploadingMedia || Boolean(editingMessage)}
           style={[
             styles.mediaButton,
-            uploadingMedia && styles.sendButtonDisabled,
+            (uploadingMedia || editingMessage) && styles.sendButtonDisabled,
           ]}
         >
           <Ionicons
@@ -964,6 +1202,7 @@ export default function ChatScreen() {
             color="#FFFFFF"
           />
         </Pressable>
+        </View>
       </View>
     </KeyboardAvoidingView>
   )
@@ -1005,6 +1244,33 @@ function MessageStatus({
   )
 }
 
+function ReplyPreview({
+  message,
+  mine,
+}: {
+  message: Message | null
+  mine: boolean
+}) {
+  return (
+    <View
+      style={[
+        styles.replyBubble,
+        mine ? styles.replyBubbleMine : styles.replyBubbleOther,
+      ]}
+    >
+      <Text
+        numberOfLines={1}
+        style={[
+          styles.replyBubbleText,
+          mine ? styles.replyBubbleTextMine : styles.replyBubbleTextOther,
+        ]}
+      >
+        {message ? getReplyText(message) : 'Message'}
+      </Text>
+    </View>
+  )
+}
+
 function getReceiptStatus(
   receipt: ReceiptPayload
 ): NonNullable<Message['receiptStatus']> {
@@ -1033,6 +1299,13 @@ function getReactionSummary(nextReactions: Reaction[]) {
     emoji,
     count: nextReactions.filter((reaction) => reaction.emoji === emoji).length,
   })).filter((reaction) => reaction.count > 0)
+}
+
+function getReplyText(message: Message) {
+  if (message.type === 'image') return 'Photo'
+  if (message.type === 'nudge') return 'Nudge'
+
+  return message.content ?? 'Message'
 }
 
 function isSameDay(a: string, b: string) {
@@ -1187,6 +1460,31 @@ const styles = StyleSheet.create({
   bubbleTextOther: {
     color: Colors.ink,
   },
+  replyBubble: {
+    marginBottom: 7,
+    paddingHorizontal: 9,
+    paddingVertical: 7,
+    borderLeftWidth: 3,
+    borderRadius: 10,
+  },
+  replyBubbleMine: {
+    borderLeftColor: '#FFFFFF',
+    backgroundColor: 'rgba(255,255,255,0.18)',
+  },
+  replyBubbleOther: {
+    borderLeftColor: Colors.primary,
+    backgroundColor: Colors.primaryTint,
+  },
+  replyBubbleText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  replyBubbleTextMine: {
+    color: '#FFFFFF',
+  },
+  replyBubbleTextOther: {
+    color: Colors.ink,
+  },
   messageImage: {
     width: 220,
     height: 220,
@@ -1253,12 +1551,47 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingTop: 10,
     paddingBottom: 18,
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 8,
     backgroundColor: Colors.surface,
     borderTopWidth: 1,
     borderTopColor: Colors.border,
+  },
+  composerRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 8,
+  },
+  replyComposer: {
+    marginBottom: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: Colors.background,
+  },
+  replyComposerText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  replyComposerLabel: {
+    color: Colors.primary,
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  replyComposerBody: {
+    marginTop: 2,
+    color: Colors.ink,
+    fontSize: 13,
+  },
+  replyClose: {
+    padding: 4,
+  },
+  composerError: {
+    marginBottom: 8,
+    color: Colors.danger,
+    fontSize: 12,
+    fontWeight: '700',
   },
   input: {
     flex: 1,
