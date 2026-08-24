@@ -16,6 +16,7 @@ import Ionicons from '@expo/vector-icons/Ionicons'
 import { Colors, SynSpacing } from '@/constants/colors'
 import { SynAvatar, SynBadge, SynEmptyState } from '@/components/syn-ui'
 import { supabase } from '@/lib/supabase'
+import { useAuth } from '@/providers/auth-provider'
 
 type ChatItem = {
   conversation_id: string
@@ -27,24 +28,37 @@ type ChatItem = {
   last_message: string | null
   last_message_type: string | null
   last_message_at: string | null
+  last_message_sender_id?: string | null
+  last_receipt_status?: 'sent' | 'delivered' | 'read' | null
   unread_count: number
 }
 
 export default function ChatsScreen() {
+  const { user } = useAuth()
   const [chats, setChats] = useState<ChatItem[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
 
   async function loadChats() {
     try {
-      const { data, error } = await supabase.rpc('get_my_chats')
+      const { data, error } = await supabase.rpc('get_my_chats_with_receipts')
 
-      if (error) {
-        console.error('GET CHATS:', error)
+      if (!error) {
+        setChats((data ?? []) as ChatItem[])
         return
       }
 
-      setChats((data ?? []) as ChatItem[])
+      console.warn('GET CHATS WITH RECEIPTS FALLBACK:', error.message)
+
+      const { data: fallbackData, error: fallbackError } =
+        await supabase.rpc('get_my_chats')
+
+      if (fallbackError) {
+        console.error('GET CHATS:', fallbackError)
+        return
+      }
+
+      setChats((fallbackData ?? []) as ChatItem[])
     } finally {
       setLoading(false)
       setRefreshing(false)
@@ -68,6 +82,10 @@ export default function ChatsScreen() {
           },
           (payload) => {
             console.log('CHATS REALTIME:', payload.new)
+            markDelivered(payload.new as {
+              conversation_id?: string
+              sender_id?: string | null
+            })
             loadChats()
           }
         )
@@ -84,7 +102,7 @@ export default function ChatsScreen() {
           console.error('REMOVE CHATS CHANNEL:', error)
         })
       }
-    }, [])
+    }, [user?.id])
   )
 
   function openChat(item: ChatItem) {
@@ -96,6 +114,23 @@ export default function ChatsScreen() {
         displayName: item.display_name ?? item.username ?? 'Syn User',
       },
     })
+  }
+
+  async function markDelivered(message: {
+    conversation_id?: string
+    sender_id?: string | null
+  }) {
+    if (!message.conversation_id || message.sender_id === user?.id) {
+      return
+    }
+
+    const { error } = await supabase.rpc('mark_conversation_delivered', {
+      target_conversation_id: message.conversation_id,
+    })
+
+    if (error) {
+      console.warn('MARK DELIVERED:', error.message)
+    }
   }
 
   if (loading) {
@@ -194,6 +229,10 @@ export default function ChatsScreen() {
                     {item.last_message ?? 'Start a conversation'}
                   </Text>
 
+                  {item.last_message_sender_id === user?.id && (
+                    <LastMessageStatus status={item.last_receipt_status} />
+                  )}
+
                   {unread && (
                     <SynBadge
                       label={item.unread_count > 99 ? '99+' : item.unread_count}
@@ -206,6 +245,20 @@ export default function ChatsScreen() {
         }}
       />
     </View>
+  )
+}
+
+function LastMessageStatus({
+  status,
+}: {
+  status?: ChatItem['last_receipt_status']
+}) {
+  return (
+    <Ionicons
+      name={status === 'delivered' || status === 'read' ? 'checkmark-done' : 'checkmark'}
+      size={14}
+      color={status === 'read' ? Colors.primary : Colors.muted}
+    />
   )
 }
 

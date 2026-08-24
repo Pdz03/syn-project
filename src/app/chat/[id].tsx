@@ -15,6 +15,7 @@ import {
 
 import { Ionicons } from '@expo/vector-icons'
 import { router, useLocalSearchParams } from 'expo-router'
+import * as Notifications from 'expo-notifications'
 
 import { Colors, SynSpacing } from '@/constants/colors'
 import { SynAvatar, SynEmptyState } from '@/components/syn-ui'
@@ -29,6 +30,14 @@ type Message = {
   content: string | null
   created_at: string
   localStatus?: 'pending' | 'sent'
+  receiptStatus?: 'sent' | 'delivered' | 'read'
+}
+
+type ReceiptPayload = {
+  message_id: string
+  user_id: string
+  delivered_at: string | null
+  read_at: string | null
 }
 
 export default function ChatScreen() {
@@ -51,6 +60,7 @@ export default function ChatScreen() {
 
     loadMessages()
     markAsRead()
+    clearChatNotifications()
 
     const channelName = `chat:${id}:${Date.now()}`
 
@@ -73,6 +83,7 @@ export default function ChatScreen() {
 
           if (newMessage.sender_id !== user?.id) {
             markAsRead()
+            clearChatNotifications()
           }
 
           setMessages((current) => {
@@ -99,8 +110,43 @@ export default function ChatScreen() {
               )
             }
 
-            return [...current, newMessage]
+            return [
+              ...current,
+              {
+                ...newMessage,
+                receiptStatus:
+                  newMessage.sender_id === user?.id ? 'sent' : undefined,
+              },
+            ]
           })
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'message_receipts',
+          filter: `conversation_id=eq.${id}`,
+        },
+        (payload) => {
+          const receipt = payload.new as ReceiptPayload
+
+          if (receipt.user_id === user?.id) {
+            return
+          }
+
+          setMessages((current) =>
+            current.map((message) =>
+              message.id === receipt.message_id &&
+              message.sender_id === user?.id
+                ? {
+                    ...message,
+                    receiptStatus: getReceiptStatus(receipt),
+                  }
+                : message
+            )
+          )
         }
       )
       .subscribe((status, error) => {
@@ -111,18 +157,55 @@ export default function ChatScreen() {
         }
       })
 
+    const notificationSubscription =
+      Notifications.addNotificationReceivedListener((notification) => {
+        const data = notification.request.content.data
+
+        if (data?.conversationId !== id) {
+          return
+        }
+
+        loadMessages(false)
+        markAsRead()
+        clearChatNotifications()
+      })
+
     return () => {
       console.log('REMOVE CHANNEL:', channelName)
+      notificationSubscription.remove()
 
       supabase.removeChannel(channel).catch((error) => {
         console.error('REMOVE CHANNEL ERROR:', error)
       })
     }
-  }, [id])
+  }, [id, user?.id])
 
-  async function loadMessages() {
+  async function loadMessages(showLoading = true) {
     try {
-      setLoading(true)
+      if (showLoading) {
+        setLoading(true)
+      }
+
+      const { data: rpcData, error: rpcError } = await supabase.rpc(
+        'get_conversation_messages',
+        {
+          target_conversation_id: id,
+        }
+      )
+
+      if (!rpcError) {
+        setMessages(
+          ((rpcData ?? []) as Array<Message & { receipt_status?: string }>).map(
+            (message) => ({
+              ...message,
+              receiptStatus: toReceiptStatus(message.receipt_status),
+            })
+          )
+        )
+        return
+      }
+
+      console.warn('GET CONVERSATION MESSAGES FALLBACK:', rpcError.message)
 
       const { data, error } = await supabase
         .from('messages')
@@ -148,7 +231,9 @@ export default function ChatScreen() {
 
       setMessages((data ?? []) as Message[])
     } finally {
-      setLoading(false)
+      if (showLoading) {
+        setLoading(false)
+      }
     }
   }
 
@@ -174,6 +259,7 @@ export default function ChatScreen() {
           content: message,
           created_at: new Date().toISOString(),
           localStatus: 'pending',
+          receiptStatus: 'sent',
         },
       ])
 
@@ -192,7 +278,9 @@ export default function ChatScreen() {
 
       setMessages((current) =>
         current.map((item) =>
-          item.id === localId ? { ...item, localStatus: 'sent' } : item
+          item.id === localId
+            ? { ...item, localStatus: 'sent', receiptStatus: 'sent' }
+            : item
         )
       )
     } finally {
@@ -240,6 +328,28 @@ export default function ChatScreen() {
     if (error) {
       console.error('MARK READ:', error)
     }
+  }
+
+  function clearChatNotifications() {
+    Notifications.getPresentedNotificationsAsync()
+      .then((notifications) => {
+        notifications.forEach((notification) => {
+          const data = notification.request.content.data
+
+          if (data?.conversationId !== id) {
+            return
+          }
+
+          Notifications.dismissNotificationAsync(
+            notification.request.identifier
+          ).catch((error) => {
+            console.warn('DISMISS NOTIFICATION:', error)
+          })
+        })
+      })
+      .catch((error) => {
+        console.warn('GET NOTIFICATIONS:', error)
+      })
   }
 
   const chatName = displayName ?? 'Syn'
@@ -379,7 +489,12 @@ export default function ChatScreen() {
                     >
                       {formatMessageTime(item.created_at)}
                     </Text>
-                    {mine && <MessageStatus status={item.localStatus} />}
+                    {mine && (
+                      <MessageStatus
+                        localStatus={item.localStatus}
+                        receiptStatus={item.receiptStatus}
+                      />
+                    )}
                   </View>
                 </View>
               </>
@@ -426,15 +541,49 @@ function DateSeparator({ dateValue }: { dateValue: string }) {
   )
 }
 
-function MessageStatus({ status }: { status?: Message['localStatus'] }) {
+function MessageStatus({
+  localStatus,
+  receiptStatus,
+}: {
+  localStatus?: Message['localStatus']
+  receiptStatus?: Message['receiptStatus']
+}) {
+  const pending = localStatus === 'pending'
+  const read = receiptStatus === 'read'
+
   return (
-    <Ionicons
-      name={status === 'pending' ? 'time-outline' : 'checkmark'}
-      size={12}
-      color="#FFFFFF"
-      style={styles.metaStatus}
-    />
+    <View style={read && styles.metaReadStatus}>
+      <Ionicons
+        name={
+          pending
+            ? 'time-outline'
+            : receiptStatus === 'delivered' || read
+              ? 'checkmark-done'
+              : 'checkmark'
+        }
+        size={12}
+        color={read ? Colors.primary : '#FFFFFF'}
+        style={styles.metaStatus}
+      />
+    </View>
   )
+}
+
+function getReceiptStatus(
+  receipt: ReceiptPayload
+): NonNullable<Message['receiptStatus']> {
+  if (receipt.read_at) return 'read'
+  if (receipt.delivered_at) return 'delivered'
+
+  return 'sent'
+}
+
+function toReceiptStatus(value?: string): Message['receiptStatus'] {
+  if (value === 'read' || value === 'delivered' || value === 'sent') {
+    return value
+  }
+
+  return undefined
 }
 
 function isSameDay(a: string, b: string) {
@@ -608,6 +757,14 @@ const styles = StyleSheet.create({
   },
   metaStatus: {
     opacity: 0.9,
+  },
+  metaReadStatus: {
+    width: 16,
+    height: 14,
+    borderRadius: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
   },
   composer: {
     paddingHorizontal: 12,
