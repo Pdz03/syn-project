@@ -21,7 +21,7 @@ import * as Clipboard from 'expo-clipboard'
 import * as ImagePicker from 'expo-image-picker'
 
 import { Colors, SynSpacing } from '@/constants/colors'
-import { SynAvatar, SynEmptyState } from '@/components/syn-ui'
+import { SynAvatar, SynEmptyState, SynModal } from '@/components/syn-ui'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/providers/auth-provider'
 
@@ -68,6 +68,7 @@ export default function ChatScreen() {
   }>()
 
   const listRef = useRef<FlatList<Message>>(null)
+  const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const { user } = useAuth()
 
   const [messages, setMessages] = useState<Message[]>([])
@@ -81,6 +82,7 @@ export default function ChatScreen() {
   const [replyTo, setReplyTo] = useState<Message | null>(null)
   const [editingMessage, setEditingMessage] = useState<Message | null>(null)
   const [composerError, setComposerError] = useState<string | null>(null)
+  const [actionMessage, setActionMessage] = useState<Message | null>(null)
 
   useEffect(() => {
     if (!id) return
@@ -276,12 +278,21 @@ export default function ChatScreen() {
     return () => {
       console.log('REMOVE CHANNEL:', channelName)
       notificationSubscription.remove()
+      if (scrollTimerRef.current) {
+        clearTimeout(scrollTimerRef.current)
+      }
 
       supabase.removeChannel(channel).catch((error) => {
         console.error('REMOVE CHANNEL ERROR:', error)
       })
     }
   }, [id, user?.id, userId])
+
+  useEffect(() => {
+    if (!loading && messages.length > 0) {
+      scrollToLatest(false)
+    }
+  }, [loading, messages.length])
 
   async function loadChatProfile() {
     if (userId) {
@@ -502,7 +513,8 @@ export default function ChatScreen() {
     }
 
     const localId = `local-image-${Date.now()}`
-    const mediaPath = buildMediaPath(id, user.id, asset.uri)
+    const contentType = getImageContentType(asset)
+    const mediaPath = buildMediaPath(id, user.id, asset.uri, contentType)
 
     try {
       setComposerError(null)
@@ -526,12 +538,12 @@ export default function ChatScreen() {
       ])
 
       const response = await fetch(asset.uri)
-      const blob = await response.blob()
+      const body = await response.arrayBuffer()
 
       const { error: uploadError } = await supabase.storage
         .from('chat-media')
-        .upload(mediaPath, blob, {
-          contentType: asset.mimeType ?? 'image/jpeg',
+        .upload(mediaPath, body, {
+          contentType,
           upsert: false,
         })
 
@@ -627,56 +639,26 @@ export default function ChatScreen() {
     })
   }
 
+  function scrollToLatest(animated = true) {
+    requestAnimationFrame(() => {
+      listRef.current?.scrollToEnd({ animated })
+    })
+
+    if (scrollTimerRef.current) {
+      clearTimeout(scrollTimerRef.current)
+    }
+
+    scrollTimerRef.current = setTimeout(() => {
+      listRef.current?.scrollToEnd({ animated })
+    }, 80)
+  }
+
   function openMessageActions(message: Message) {
     if (message.id.startsWith('local-')) {
       return
     }
 
-    const reactionButtons = REACTION_OPTIONS.map((emoji) => ({
-      text: emoji,
-      onPress: () => toggleReaction(message.id, emoji),
-    }))
-
-    Alert.alert('Message', undefined, [
-      {
-        text: 'Reply',
-        onPress: () => setReplyTo(message),
-      },
-      ...(message.sender_id === user?.id && message.type === 'text'
-        ? [
-            {
-              text: 'Edit',
-              onPress: () => startEditMessage(message),
-            },
-          ]
-        : []),
-      ...reactionButtons,
-      ...(message.type === 'text' && message.content
-        ? [
-            {
-              text: 'Copy',
-              onPress: () => {
-                Clipboard.setStringAsync(message.content ?? '').catch((error) => {
-                  console.warn('COPY MESSAGE:', error)
-                })
-              },
-            },
-          ]
-        : []),
-      ...(message.sender_id === user?.id
-        ? [
-            {
-              text: 'Delete',
-              style: 'destructive' as const,
-              onPress: () => confirmDeleteMessage(message),
-            },
-          ]
-        : []),
-      {
-        text: 'Cancel',
-        style: 'cancel',
-      },
-    ])
+    setActionMessage(message)
   }
 
   function confirmDeleteMessage(message: Message) {
@@ -740,10 +722,41 @@ export default function ChatScreen() {
     if (error) {
       console.warn('TOGGLE REACTION:', error.message)
       Alert.alert('Reaction failed', 'Belum bisa menambahkan reaction.')
+      return
     }
+
+    setReactions((current) => {
+      const existing = current.find(
+        (reaction) =>
+          reaction.message_id === messageId &&
+          reaction.user_id === user?.id
+      )
+
+      const withoutMine = current.filter(
+        (reaction) =>
+          !(
+            reaction.message_id === messageId &&
+            reaction.user_id === user?.id
+          )
+      )
+
+      if (existing?.emoji === emoji || !user?.id) {
+        return withoutMine
+      }
+
+      return [
+        ...withoutMine,
+        {
+          message_id: messageId,
+          user_id: user.id,
+          emoji,
+        },
+      ]
+    })
   }
 
   function startEditMessage(message: Message) {
+    setActionMessage(null)
     setReplyTo(null)
     setComposerError(null)
     setEditingMessage(message)
@@ -933,14 +946,18 @@ export default function ChatScreen() {
         <FlatList
           ref={listRef}
           onContentSizeChange={() => {
-            listRef.current?.scrollToEnd({
-              animated: true,
-            })
+            scrollToLatest(false)
           }}
           onLayout={() => {
-            listRef.current?.scrollToEnd({
+            scrollToLatest(false)
+          }}
+          initialScrollIndex={messages.length > 1 ? messages.length - 1 : undefined}
+          onScrollToIndexFailed={(info) => {
+            listRef.current?.scrollToOffset({
+              offset: info.averageItemLength * info.index,
               animated: false,
             })
+            setTimeout(() => scrollToLatest(false), 120)
           }}
           data={messages}
           keyExtractor={(item) => item.id}
@@ -998,6 +1015,7 @@ export default function ChatScreen() {
                   style={[
                     styles.bubble,
                     mine ? styles.bubbleMine : styles.bubbleOther,
+                    itemReactions.length > 0 && styles.bubbleWithReactions,
                   ]}
                 >
                   <Pressable
@@ -1080,6 +1098,32 @@ export default function ChatScreen() {
           }}
         />
       )}
+
+      <MessageActionSheet
+        message={actionMessage}
+        mine={actionMessage?.sender_id === user?.id}
+        onClose={() => setActionMessage(null)}
+        onReply={(message) => {
+          setActionMessage(null)
+          setEditingMessage(null)
+          setReplyTo(message)
+        }}
+        onEdit={startEditMessage}
+        onCopy={(message) => {
+          setActionMessage(null)
+          Clipboard.setStringAsync(message.content ?? '').catch((error) => {
+            console.warn('COPY MESSAGE:', error)
+          })
+        }}
+        onDelete={(message) => {
+          setActionMessage(null)
+          confirmDeleteMessage(message)
+        }}
+        onReact={(message, emoji) => {
+          setActionMessage(null)
+          toggleReaction(message.id, emoji)
+        }}
+      />
 
       <View style={styles.composer}>
         {composerError && (
@@ -1216,6 +1260,125 @@ function DateSeparator({ dateValue }: { dateValue: string }) {
   )
 }
 
+function MessageActionSheet({
+  message,
+  mine,
+  onClose,
+  onReply,
+  onEdit,
+  onCopy,
+  onDelete,
+  onReact,
+}: {
+  message: Message | null
+  mine: boolean
+  onClose: () => void
+  onReply: (message: Message) => void
+  onEdit: (message: Message) => void
+  onCopy: (message: Message) => void
+  onDelete: (message: Message) => void
+  onReact: (message: Message, emoji: string) => void
+}) {
+  if (!message) {
+    return null
+  }
+
+  return (
+    <SynModal
+      visible={Boolean(message)}
+      onClose={onClose}
+      title="Message"
+    >
+      <View style={styles.actionReactionRow}>
+        {REACTION_OPTIONS.map((emoji) => (
+          <Pressable
+            key={emoji}
+            accessibilityRole="button"
+            onPress={() => onReact(message, emoji)}
+            style={styles.actionReaction}
+          >
+            <Text style={styles.actionReactionText}>{emoji}</Text>
+          </Pressable>
+        ))}
+      </View>
+
+      <ActionSheetItem
+        icon="return-down-back-outline"
+        label="Reply"
+        onPress={() => onReply(message)}
+      />
+
+      {mine && message.type === 'text' && (
+        <ActionSheetItem
+          icon="create-outline"
+          label="Edit"
+          onPress={() => onEdit(message)}
+        />
+      )}
+
+      {message.type === 'text' && message.content && (
+        <ActionSheetItem
+          icon="copy-outline"
+          label="Copy"
+          onPress={() => onCopy(message)}
+        />
+      )}
+
+      {mine && (
+        <ActionSheetItem
+          icon="trash-outline"
+          label="Delete"
+          danger
+          onPress={() => onDelete(message)}
+        />
+      )}
+
+      <ActionSheetItem
+        icon="close-outline"
+        label="Cancel"
+        onPress={onClose}
+      />
+    </SynModal>
+  )
+}
+
+function ActionSheetItem({
+  icon,
+  label,
+  danger,
+  onPress,
+}: {
+  icon: keyof typeof Ionicons.glyphMap
+  label: string
+  danger?: boolean
+  onPress: () => void
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.actionItem,
+        pressed && styles.actionPressed,
+      ]}
+    >
+      <Ionicons
+        name={icon}
+        size={20}
+        color={danger ? Colors.danger : Colors.primary}
+      />
+      <Text
+        style={[
+          styles.actionLabel,
+          danger && styles.actionLabelDanger,
+        ]}
+      >
+        {label}
+      </Text>
+    </Pressable>
+  )
+}
+
 function MessageStatus({
   localStatus,
   receiptStatus,
@@ -1288,10 +1451,37 @@ function toReceiptStatus(value?: string): Message['receiptStatus'] {
   return undefined
 }
 
-function buildMediaPath(conversationId: string, userId: string, uri: string) {
-  const extension = uri.split('.').pop()?.split('?')[0] ?? 'jpg'
+function buildMediaPath(
+  conversationId: string,
+  userId: string,
+  uri: string,
+  contentType: string
+) {
+  const extension =
+    contentType === 'image/png'
+      ? 'png'
+      : contentType === 'image/webp'
+        ? 'webp'
+        : uri.split('.').pop()?.split('?')[0] ?? 'jpg'
 
   return `${conversationId}/${userId}/${Date.now()}.${extension}`
+}
+
+function getImageContentType(asset: ImagePicker.ImagePickerAsset) {
+  if (
+    asset.mimeType === 'image/jpeg' ||
+    asset.mimeType === 'image/png' ||
+    asset.mimeType === 'image/webp'
+  ) {
+    return asset.mimeType
+  }
+
+  const path = asset.uri.toLowerCase()
+
+  if (path.endsWith('.png')) return 'image/png'
+  if (path.endsWith('.webp')) return 'image/webp'
+
+  return 'image/jpeg'
 }
 
 function getReactionSummary(nextReactions: Reaction[]) {
@@ -1437,6 +1627,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderRadius: 18,
+    position: 'relative',
+  },
+  bubbleWithReactions: {
+    marginBottom: 22,
   },
   bubbleMine: {
     alignSelf: 'flex-end',
@@ -1525,27 +1719,72 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
   reactionRow: {
-    marginTop: 6,
+    position: 'absolute',
+    bottom: -16,
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 4,
   },
   reactionRowMine: {
+    right: 8,
     justifyContent: 'flex-end',
   },
   reactionRowOther: {
+    left: 8,
     justifyContent: 'flex-start',
   },
   reactionChip: {
-    paddingHorizontal: 7,
-    paddingVertical: 3,
+    minHeight: 25,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
     borderRadius: 999,
+    borderWidth: 1,
+    borderColor: Colors.primaryAlpha,
     backgroundColor: Colors.surface,
+    shadowColor: Colors.primaryShadow,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.18,
+    shadowRadius: 7,
+    elevation: 3,
   },
   reactionText: {
     color: Colors.ink,
     fontSize: 12,
     fontWeight: '700',
+  },
+  actionReactionRow: {
+    marginBottom: 12,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  actionReaction: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.primaryTint,
+  },
+  actionReactionText: {
+    fontSize: 22,
+  },
+  actionItem: {
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  actionPressed: {
+    opacity: 0.65,
+  },
+  actionLabel: {
+    color: Colors.ink,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  actionLabelDanger: {
+    color: Colors.danger,
   },
   composer: {
     paddingHorizontal: 12,

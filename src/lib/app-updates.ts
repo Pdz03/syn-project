@@ -26,10 +26,10 @@ export async function checkForAppUpdate({
   const currentVersion = Constants.expoConfig?.version ?? '0.0.0'
 
   const { data, error } = await supabase.rpc('check_app_update', {
-    install_id: installId,
-    platform_name: Platform.OS,
-    installed_version: currentVersion,
-    current_user_id: userId ?? null,
+    p_install_id: installId,
+    p_platform_name: Platform.OS,
+    p_installed_version: currentVersion,
+    p_current_user_id: userId ?? null,
   })
 
   if (error) {

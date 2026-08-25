@@ -1,0 +1,5 @@
+.gradle-home/
+android/.gradle/
+android/build/
+android/app/build/
+node_modules/

@@ -27,11 +27,13 @@ create policy "authenticated users can read app versions"
   for select
   using (auth.uid() is not null);
 
+drop function if exists public.check_app_update(text, text, text, uuid);
+
 create or replace function public.check_app_update(
-  install_id text,
-  platform_name text,
-  installed_version text,
-  current_user_id uuid default null
+  p_install_id text,
+  p_platform_name text,
+  p_installed_version text,
+  p_current_user_id uuid default null
 )
 returns table (
   update_available boolean,
@@ -53,10 +55,10 @@ begin
     last_seen_at
   )
   values (
-    install_id,
-    current_user_id,
-    platform_name,
-    installed_version,
+    p_install_id,
+    p_current_user_id,
+    p_platform_name,
+    p_installed_version,
     now()
   )
   on conflict (install_id) do update
@@ -68,13 +70,13 @@ begin
 
   return query
   select
-    coalesce(v.latest_version <> installed_version, false) as update_available,
+    coalesce(v.latest_version <> p_installed_version, false) as update_available,
     coalesce(v.force_update, false) as force_update,
     v.latest_version,
     v.download_url,
     v.message
   from public.app_versions v
-  where v.platform = platform_name;
+  where v.platform = p_platform_name;
 end;
 $$;
 

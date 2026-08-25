@@ -19,6 +19,15 @@ where mr.message_id = m.id
 alter table public.message_reactions
   alter column conversation_id set not null;
 
+delete from public.message_reactions a
+using public.message_reactions b
+where a.ctid < b.ctid
+  and a.message_id = b.message_id
+  and a.user_id = b.user_id;
+
+create unique index if not exists message_reactions_message_user_idx
+  on public.message_reactions(message_id, user_id);
+
 create index if not exists message_reactions_conversation_idx
   on public.message_reactions(conversation_id);
 
