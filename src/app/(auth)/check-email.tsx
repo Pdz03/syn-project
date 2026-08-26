@@ -14,7 +14,7 @@ import {
 import { Ionicons } from '@expo/vector-icons'
 
 import { Colors, SynRadius, SynSpacing } from '@/constants/colors'
-import { SynButton, SynCard } from '@/components/syn-ui'
+import { SynBrandLogo, SynButton, SynCard } from '@/components/syn-ui'
 import { supabase } from '@/lib/supabase'
 
 export default function CheckEmailScreen() {
@@ -50,7 +50,7 @@ export default function CheckEmailScreen() {
   return (
     <View style={styles.screen}>
       <View style={styles.brandRow}>
-        <Text style={styles.logo}>syn</Text>
+        <SynBrandLogo />
       </View>
 
       <View style={styles.content}>
@@ -99,12 +99,6 @@ const styles = StyleSheet.create({
   brandRow: {
     paddingTop: 58,
     paddingHorizontal: SynSpacing.gutter,
-  },
-  logo: {
-    color: Colors.primary,
-    fontSize: 28,
-    fontWeight: '800',
-    letterSpacing: -1,
   },
   content: {
     flex: 1,

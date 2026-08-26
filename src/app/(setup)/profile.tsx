@@ -13,7 +13,7 @@ import {
 import { router } from 'expo-router'
 
 import { Colors, SynSpacing } from '@/constants/colors'
-import { SynAvatar, SynButton, SynInput } from '@/components/syn-ui'
+import { SynAvatar, SynBrandLogo, SynButton, SynInput } from '@/components/syn-ui'
 import { supabase } from '@/lib/supabase'
 import { useAuth } from '@/providers/auth-provider'
 
@@ -107,7 +107,7 @@ export default function SetupProfileScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <View style={styles.brandRow}>
-        <Text style={styles.logo}>syn</Text>
+        <SynBrandLogo />
       </View>
 
       <ScrollView
@@ -195,12 +195,6 @@ const styles = StyleSheet.create({
   brandRow: {
     paddingTop: 58,
     paddingHorizontal: SynSpacing.gutter,
-  },
-  logo: {
-    color: Colors.primary,
-    fontSize: 28,
-    fontWeight: '800',
-    letterSpacing: -1,
   },
   content: {
     paddingHorizontal: SynSpacing.xxl,

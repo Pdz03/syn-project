@@ -23,7 +23,10 @@ export async function checkForAppUpdate({
   silent?: boolean
 }) {
   const installId = await getInstallId()
-  const currentVersion = Constants.expoConfig?.version ?? '0.0.0'
+  const currentVersion =
+    Constants.nativeAppVersion ??
+    Constants.expoConfig?.version ??
+    '0.0.0'
 
   const { data, error } = await supabase.rpc('check_app_update', {
     p_install_id: installId,

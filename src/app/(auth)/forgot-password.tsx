@@ -11,7 +11,7 @@ import {
 import { router } from 'expo-router'
 
 import { Colors, SynSpacing } from '@/constants/colors'
-import { SynButton, SynInput } from '@/components/syn-ui'
+import { SynBrandLogo, SynButton, SynInput } from '@/components/syn-ui'
 import { supabase } from '@/lib/supabase'
 
 export default function ForgotPasswordScreen() {
@@ -62,7 +62,7 @@ export default function ForgotPasswordScreen() {
   return (
     <View style={styles.screen}>
       <View style={styles.brandRow}>
-        <Text style={styles.logo}>syn</Text>
+        <SynBrandLogo />
       </View>
 
       <View style={styles.content}>
@@ -110,12 +110,6 @@ const styles = StyleSheet.create({
   brandRow: {
     paddingTop: 58,
     paddingHorizontal: SynSpacing.gutter,
-  },
-  logo: {
-    color: Colors.primary,
-    fontSize: 28,
-    fontWeight: '800',
-    letterSpacing: -1,
   },
   content: {
     flex: 1,

@@ -112,6 +112,7 @@ export default function ChatsScreen() {
         id: item.conversation_id,
         userId: item.other_user_id,
         displayName: item.display_name ?? item.username ?? 'Syn User',
+        unreadCount: String(item.unread_count ?? 0),
       },
     })
   }
@@ -265,6 +266,10 @@ function LastMessageStatus({
 function formatLastMessage(item: ChatItem) {
   if (item.last_message_type === 'image') {
     return 'Photo'
+  }
+
+  if (item.last_message_type === 'system') {
+    return 'Message was deleted'
   }
 
   return item.last_message ?? 'Start a conversation'

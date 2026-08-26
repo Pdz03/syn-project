@@ -6,6 +6,7 @@ import {
   FlatList,
   Image,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   StyleSheet,
@@ -61,14 +62,17 @@ type Reaction = {
 const REACTION_OPTIONS = ['👍', '❤️', '😂', '🔥', '😮']
 
 export default function ChatScreen() {
-  const { id, userId, displayName } = useLocalSearchParams<{
+  const { id, userId, displayName, unreadCount } = useLocalSearchParams<{
     id: string
     userId?: string
     displayName?: string
+    unreadCount?: string
   }>()
 
   const listRef = useRef<FlatList<Message>>(null)
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const initialScrollReadyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const initialScrollDoneRef = useRef(false)
   const { user } = useAuth()
 
   const [messages, setMessages] = useState<Message[]>([])
@@ -83,10 +87,12 @@ export default function ChatScreen() {
   const [editingMessage, setEditingMessage] = useState<Message | null>(null)
   const [composerError, setComposerError] = useState<string | null>(null)
   const [actionMessage, setActionMessage] = useState<Message | null>(null)
+  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null)
 
   useEffect(() => {
     if (!id) return
 
+    initialScrollDoneRef.current = false
     loadMessages()
     loadChatProfile()
     markAsRead()
@@ -281,6 +287,9 @@ export default function ChatScreen() {
       if (scrollTimerRef.current) {
         clearTimeout(scrollTimerRef.current)
       }
+      if (initialScrollReadyTimerRef.current) {
+        clearTimeout(initialScrollReadyTimerRef.current)
+      }
 
       supabase.removeChannel(channel).catch((error) => {
         console.error('REMOVE CHANNEL ERROR:', error)
@@ -289,10 +298,13 @@ export default function ChatScreen() {
   }, [id, user?.id, userId])
 
   useEffect(() => {
-    if (!loading && messages.length > 0) {
-      scrollToLatest(false)
+    if (!loading && messages.length > 0 && !initialScrollDoneRef.current) {
+      scrollToInitialTarget(false)
+      initialScrollReadyTimerRef.current = setTimeout(() => {
+        initialScrollDoneRef.current = true
+      }, 250)
     }
-  }, [loading, messages.length])
+  }, [loading, messages.length, unreadCount, user?.id])
 
   async function loadChatProfile() {
     if (userId) {
@@ -653,6 +665,27 @@ export default function ChatScreen() {
     }, 80)
   }
 
+  function scrollToInitialTarget(animated = false) {
+    const targetIndex = getUnreadBoundaryIndex(
+      messages,
+      user?.id,
+      parseUnreadCount(unreadCount)
+    )
+
+    if (targetIndex < 0) {
+      scrollToLatest(animated)
+      return
+    }
+
+    requestAnimationFrame(() => {
+      listRef.current?.scrollToIndex({
+        index: targetIndex,
+        animated,
+        viewPosition: 0.18,
+      })
+    })
+  }
+
   function openMessageActions(message: Message) {
     if (message.id.startsWith('local-')) {
       return
@@ -662,13 +695,13 @@ export default function ChatScreen() {
   }
 
   function confirmDeleteMessage(message: Message) {
-    Alert.alert('Delete message?', 'This message will be removed from chat.', [
+    Alert.alert('Delete for everyone?', 'This message will be removed from this chat for both of you.', [
       {
         text: 'Cancel',
         style: 'cancel',
       },
       {
-        text: 'Delete',
+        text: 'Delete for everyone',
         style: 'destructive',
         onPress: () => deleteMessage(message),
       },
@@ -702,7 +735,16 @@ export default function ChatScreen() {
     }
 
     setMessages((current) =>
-      current.filter((currentMessage) => currentMessage.id !== message.id)
+      current.map((currentMessage) =>
+        currentMessage.id === message.id
+          ? {
+              ...currentMessage,
+              type: 'system',
+              content: 'This message was deleted',
+              reply_message_id: null,
+            }
+          : currentMessage
+      )
     )
     setReactions((current) =>
       current.filter((reaction) => reaction.message_id !== message.id)
@@ -881,6 +923,14 @@ export default function ChatScreen() {
     chatProfile?.username ??
     displayName ??
     'Syn'
+  const initialUnreadCount = parseUnreadCount(unreadCount)
+  const unreadBoundaryIndex = getUnreadBoundaryIndex(
+    messages,
+    user?.id,
+    initialUnreadCount
+  )
+  const unreadBoundaryId =
+    unreadBoundaryIndex >= 0 ? messages[unreadBoundaryIndex]?.id : null
 
   return (
     <KeyboardAvoidingView
@@ -946,18 +996,30 @@ export default function ChatScreen() {
         <FlatList
           ref={listRef}
           onContentSizeChange={() => {
-            scrollToLatest(false)
+            if (initialScrollDoneRef.current) {
+              scrollToLatest()
+            } else {
+              scrollToInitialTarget(false)
+            }
           }}
           onLayout={() => {
-            scrollToLatest(false)
+            if (!initialScrollDoneRef.current) {
+              scrollToInitialTarget(false)
+            }
           }}
-          initialScrollIndex={messages.length > 1 ? messages.length - 1 : undefined}
+          initialScrollIndex={
+            messages.length > 1
+              ? unreadBoundaryIndex >= 0
+                ? unreadBoundaryIndex
+                : messages.length - 1
+              : undefined
+          }
           onScrollToIndexFailed={(info) => {
             listRef.current?.scrollToOffset({
               offset: info.averageItemLength * info.index,
               animated: false,
             })
-            setTimeout(() => scrollToLatest(false), 120)
+            setTimeout(() => scrollToInitialTarget(false), 120)
           }}
           data={messages}
           keyExtractor={(item) => item.id}
@@ -981,6 +1043,9 @@ export default function ChatScreen() {
               return (
                 <>
                   {showDate && <DateSeparator dateValue={item.created_at} />}
+                  {unreadBoundaryId === item.id && (
+                    <UnreadSeparator count={initialUnreadCount} />
+                  )}
 
                   <View style={styles.nudgeRow}>
                     <View style={styles.nudgePill}>
@@ -999,6 +1064,24 @@ export default function ChatScreen() {
               )
             }
 
+            if (isDeletedMessage(item)) {
+              return (
+                <>
+                  {showDate && <DateSeparator dateValue={item.created_at} />}
+                  {unreadBoundaryId === item.id && (
+                    <UnreadSeparator count={initialUnreadCount} />
+                  )}
+
+                  <View style={styles.deletedRow}>
+                    <Text style={styles.deletedText}>Message was deleted</Text>
+                    <Text style={styles.deletedTime}>
+                      {formatMessageTime(item.created_at)}
+                    </Text>
+                  </View>
+                </>
+              )
+            }
+
             const imageUrl = imageUrls[item.id]
             const repliedMessage = item.reply_message_id
               ? messages.find((message) => message.id === item.reply_message_id)
@@ -1010,6 +1093,9 @@ export default function ChatScreen() {
             return (
               <>
                 {showDate && <DateSeparator dateValue={item.created_at} />}
+                {unreadBoundaryId === item.id && (
+                  <UnreadSeparator count={initialUnreadCount} />
+                )}
 
                 <View
                   style={[
@@ -1019,6 +1105,11 @@ export default function ChatScreen() {
                   ]}
                 >
                   <Pressable
+                    onPress={() => {
+                      if (item.type === 'image' && imageUrl) {
+                        setPreviewImageUrl(imageUrl)
+                      }
+                    }}
                     onLongPress={() => openMessageActions(item)}
                   >
                     {item.reply_message_id && (
@@ -1123,6 +1214,11 @@ export default function ChatScreen() {
           setActionMessage(null)
           toggleReaction(message.id, emoji)
         }}
+      />
+
+      <ImagePreviewModal
+        imageUrl={previewImageUrl}
+        onClose={() => setPreviewImageUrl(null)}
       />
 
       <View style={styles.composer}>
@@ -1252,10 +1348,61 @@ export default function ChatScreen() {
   )
 }
 
+function ImagePreviewModal({
+  imageUrl,
+  onClose,
+}: {
+  imageUrl: string | null
+  onClose: () => void
+}) {
+  return (
+    <Modal
+      visible={Boolean(imageUrl)}
+      transparent
+      animationType="fade"
+      onRequestClose={onClose}
+    >
+      <View style={styles.previewOverlay}>
+        <Pressable
+          accessibilityRole="button"
+          onPress={onClose}
+          style={styles.previewClose}
+        >
+          <Ionicons
+            name="close"
+            size={24}
+            color="#FFFFFF"
+          />
+        </Pressable>
+
+        {imageUrl && (
+          <Image
+            source={{ uri: imageUrl }}
+            resizeMode="contain"
+            style={styles.previewImage}
+          />
+        )}
+      </View>
+    </Modal>
+  )
+}
+
 function DateSeparator({ dateValue }: { dateValue: string }) {
   return (
     <View style={styles.dateSeparator}>
       <Text style={styles.dateSeparatorText}>{formatDateLabel(dateValue)}</Text>
+    </View>
+  )
+}
+
+function UnreadSeparator({ count }: { count: number }) {
+  return (
+    <View style={styles.unreadSeparator}>
+      <View style={styles.unreadLine} />
+      <Text style={styles.unreadText}>
+        {count === 1 ? '1 unread message' : `${count} unread messages`}
+      </Text>
+      <View style={styles.unreadLine} />
     </View>
   )
 }
@@ -1327,7 +1474,7 @@ function MessageActionSheet({
       {mine && (
         <ActionSheetItem
           icon="trash-outline"
-          label="Delete"
+          label="Delete for everyone"
           danger
           onPress={() => onDelete(message)}
         />
@@ -1492,10 +1639,49 @@ function getReactionSummary(nextReactions: Reaction[]) {
 }
 
 function getReplyText(message: Message) {
+  if (isDeletedMessage(message)) return 'Message was deleted'
   if (message.type === 'image') return 'Photo'
   if (message.type === 'nudge') return 'Nudge'
 
   return message.content ?? 'Message'
+}
+
+function isDeletedMessage(message: Message) {
+  return message.type === 'system' && message.content === 'This message was deleted'
+}
+
+function parseUnreadCount(value?: string) {
+  const count = Number(value)
+
+  return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0
+}
+
+function getUnreadBoundaryIndex(
+  messages: Message[],
+  currentUserId: string | undefined,
+  unreadCount: number
+) {
+  if (!currentUserId || unreadCount <= 0) {
+    return -1
+  }
+
+  let remaining = unreadCount
+
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+
+    if (message.sender_id === currentUserId || message.id.startsWith('local-')) {
+      continue
+    }
+
+    remaining -= 1
+
+    if (remaining === 0) {
+      return index
+    }
+  }
+
+  return -1
 }
 
 function isSameDay(a: string, b: string) {
@@ -1575,6 +1761,28 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  previewOverlay: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.92)',
+  },
+  previewClose: {
+    position: 'absolute',
+    top: 52,
+    right: 18,
+    zIndex: 2,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.16)',
+  },
+  previewImage: {
+    width: '100%',
+    height: '100%',
+  },
   messageList: {
     paddingHorizontal: SynSpacing.lg,
     paddingVertical: SynSpacing.lg,
@@ -1606,6 +1814,29 @@ const styles = StyleSheet.create({
     fontSize: 11,
     opacity: 0.72,
   },
+  deletedRow: {
+    alignSelf: 'center',
+    marginVertical: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: Colors.surface,
+    borderWidth: 1,
+    borderColor: Colors.border,
+  },
+  deletedText: {
+    color: Colors.muted,
+    fontSize: 12,
+    fontStyle: 'italic',
+    fontWeight: '700',
+  },
+  deletedTime: {
+    color: Colors.muted,
+    fontSize: 10,
+  },
   dateSeparator: {
     alignItems: 'center',
     marginTop: 4,
@@ -1620,6 +1851,28 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     backgroundColor: Colors.surface,
+  },
+  unreadSeparator: {
+    marginTop: 2,
+    marginBottom: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  unreadLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: Colors.primaryAlpha,
+  },
+  unreadText: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    overflow: 'hidden',
+    color: Colors.primary,
+    fontSize: 11,
+    fontWeight: '800',
+    backgroundColor: Colors.primaryTint,
   },
   bubble: {
     maxWidth: '78%',

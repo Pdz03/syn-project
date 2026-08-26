@@ -9,6 +9,7 @@ import {
   Text,
   TextInput,
   type ImageSourcePropType,
+  type ImageStyle,
   type PressableProps,
   type StyleProp,
   type TextInputProps,
@@ -28,6 +29,38 @@ import {
 type IconName = keyof typeof Ionicons.glyphMap
 
 type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger'
+
+type SynBrandLogoProps = {
+  variant?: 'orange' | 'white'
+  width?: number
+  height?: number
+  style?: StyleProp<ImageStyle>
+}
+
+export function SynBrandLogo({
+  variant = 'orange',
+  width = 72,
+  height = 46,
+  style,
+}: SynBrandLogoProps) {
+  return (
+    <Image
+      source={
+        variant === 'white'
+          ? require('@/assets/images/syn_brand_white.png')
+          : require('@/assets/images/syn_brand.png')
+      }
+      resizeMode="contain"
+      style={[
+        {
+          width,
+          height,
+        },
+        style,
+      ]}
+    />
+  )
+}
 
 type SynButtonProps = PressableProps & {
   title: string

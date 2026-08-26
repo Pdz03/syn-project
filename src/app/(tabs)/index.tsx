@@ -1,4 +1,5 @@
 import {
+  Image,
   Pressable,
   Text,
   View,
@@ -41,16 +42,14 @@ export default function UpdatesScreen() {
           Colors.background,
       }}
     >
-      <Text
+      <Image
+        source={require('@/assets/images/syn_brand.png')}
+        resizeMode="contain"
         style={{
-          fontSize: 36,
-          fontWeight: '800',
-          color:
-            Colors.primary,
+          width: 132,
+          height: 84,
         }}
-      >
-        syn
-      </Text>
+      />
 
       <Text
         style={{
