@@ -1,6 +1,12 @@
 import {
+  useEffect,
+  useState,
+} from 'react'
+
+import {
   Alert,
   Pressable,
+  Share,
   Text,
   View,
 } from 'react-native'
@@ -12,9 +18,42 @@ import { useAuth } from '@/providers/auth-provider'
 import { supabase } from '@/lib/supabase'
 import { Colors } from '@/constants/colors'
 import { checkForAppUpdate } from '@/lib/app-updates'
+import {
+  getActiveSurveyLink,
+  openSurveyLink,
+  type SurveyLink,
+} from '@/lib/survey-links'
 
 export default function MeScreen() {
   const { profile, user } = useAuth()
+  const [surveyLink, setSurveyLink] =
+    useState<SurveyLink | null>(null)
+
+  useEffect(() => {
+    getActiveSurveyLink().then(setSurveyLink)
+  }, [])
+
+  function handleShareSynId() {
+    const synId = profile?.syn_id
+
+    if (!synId) {
+      Alert.alert('Syn ID unavailable', 'Syn ID kamu belum siap.')
+      return
+    }
+
+    Share.share({
+      message: [
+        'Add me on Syn',
+        '',
+        `Name: ${profile?.display_name ?? 'Syn User'}`,
+        `Syn ID: ${synId}`,
+        '',
+        'Open Syn, tap Add Syn, then search my Syn ID.',
+      ].join('\n'),
+    }).catch((error) => {
+      console.warn('SHARE SYN ID:', error)
+    })
+  }
 
   async function handleLogout() {
     Alert.alert(
@@ -177,11 +216,9 @@ export default function MeScreen() {
           />
 
           <MenuItem
-            icon="qr-code-outline"
-            title="My Syn Code"
-            onPress={() =>
-              console.log('SYN CODE')
-            }
+            icon="share-social-outline"
+            title="Share my Syn ID"
+            onPress={handleShareSynId}
           />
 
           <MenuItem
@@ -191,6 +228,16 @@ export default function MeScreen() {
               console.log('SETTINGS')
             }
           />
+
+          {surveyLink && (
+            <MenuItem
+              icon="chatbox-ellipses-outline"
+              title={surveyLink.title}
+              onPress={() =>
+                openSurveyLink(surveyLink)
+              }
+            />
+          )}
 
           <MenuItem
             icon="cloud-download-outline"

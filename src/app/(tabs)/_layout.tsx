@@ -1,4 +1,4 @@
-import { Redirect, Tabs, router } from 'expo-router'
+import { Redirect, Tabs, router, useFocusEffect } from 'expo-router'
 import {
   ActivityIndicator,
   Pressable,
@@ -9,11 +9,16 @@ import { Ionicons } from '@expo/vector-icons'
 
 import { useAuth } from '@/providers/auth-provider'
 import { Colors } from '@/constants/colors'
-import { useState, useEffect } from 'react'
+import { useCallback, useState, useEffect } from 'react'
 import SynActionSheet from '@/components/SynActionSheet'
 import { registerForPushNotifications }
   from '@/lib/notifications'
 import { checkForAppUpdate } from '@/lib/app-updates'
+import { supabase } from '@/lib/supabase'
+import {
+  getChatUnreadTotal,
+  getSynRequestCount,
+} from '@/lib/notification-counts'
 
 export default function TabsLayout() {
   const {
@@ -24,11 +29,15 @@ export default function TabsLayout() {
   } = useAuth()
 
   const [actionsVisible, setActionsVisible] = useState(false)
+  const [chatUnreadTotal, setChatUnreadTotal] = useState(0)
+  const [synRequestCount, setSynRequestCount] = useState(0)
 
   useEffect(() => {
     if (!session?.user?.id) {
       return
     }
+
+    loadBadgeCounts()
 
     registerForPushNotifications(
       session.user.id
@@ -38,7 +47,51 @@ export default function TabsLayout() {
       userId: session.user.id,
       silent: true,
     })
+
+    const channel = supabase
+      .channel(`tab-badges:${session.user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'messages',
+        },
+        loadBadgeCounts
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'syn_requests',
+        },
+        loadBadgeCounts
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
   }, [session?.user?.id])
+
+  useFocusEffect(
+    useCallback(() => {
+      if (session?.user?.id) {
+        loadBadgeCounts()
+      }
+    }, [session?.user?.id])
+  )
+
+  async function loadBadgeCounts() {
+    const [nextChatUnreadTotal, nextSynRequestCount] = await Promise.all([
+      getChatUnreadTotal(),
+      getSynRequestCount(session?.user?.id),
+    ])
+
+    setChatUnreadTotal(nextChatUnreadTotal)
+    setSynRequestCount(nextSynRequestCount)
+  }
 
   if (loading || profileLoading) {
     return (
@@ -99,6 +152,13 @@ export default function TabsLayout() {
         name="chats"
         options={{
           title: 'Chats',
+          tabBarBadge:
+            chatUnreadTotal > 0
+              ? chatUnreadTotal > 99
+                ? '99+'
+                : chatUnreadTotal
+              : undefined,
+          tabBarBadgeStyle: styles.tabBadge,
           tabBarIcon: ({ color, focused }) => (
             <Ionicons
               name={focused ? 'chatbubble' : 'chatbubble-outline'}
@@ -151,6 +211,13 @@ export default function TabsLayout() {
         name="me"
         options={{
           title: 'Me',
+          tabBarBadge:
+            synRequestCount > 0
+              ? synRequestCount > 99
+                ? '99+'
+                : synRequestCount
+              : undefined,
+          tabBarBadgeStyle: styles.tabBadge,
           tabBarIcon: ({ color, focused }) => (
             <Ionicons
               name={focused ? 'person' : 'person-outline'}
@@ -208,6 +275,12 @@ const styles = StyleSheet.create({
   tabLabel: {
     fontSize: 10,
     fontWeight: '700',
+  },
+  tabBadge: {
+    backgroundColor: Colors.primary,
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '800',
   },
   createButton: {
     width: 52,

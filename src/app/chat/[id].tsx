@@ -7,6 +7,8 @@ import {
   Image,
   KeyboardAvoidingView,
   Modal,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   Platform,
   Pressable,
   StyleSheet,
@@ -61,6 +63,8 @@ type Reaction = {
 
 const REACTION_OPTIONS = ['👍', '❤️', '😂', '🔥', '😮']
 
+const BOTTOM_SCROLL_THRESHOLD = 96
+
 export default function ChatScreen() {
   const { id, userId, displayName, unreadCount } = useLocalSearchParams<{
     id: string
@@ -73,6 +77,7 @@ export default function ChatScreen() {
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const initialScrollReadyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const initialScrollDoneRef = useRef(false)
+  const isNearBottomRef = useRef(true)
   const { user } = useAuth()
 
   const [messages, setMessages] = useState<Message[]>([])
@@ -88,6 +93,8 @@ export default function ChatScreen() {
   const [composerError, setComposerError] = useState<string | null>(null)
   const [actionMessage, setActionMessage] = useState<Message | null>(null)
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null)
+  const [showScrollButton, setShowScrollButton] = useState(false)
+  const [newRoomMessageCount, setNewRoomMessageCount] = useState(0)
 
   useEffect(() => {
     if (!id) return
@@ -133,6 +140,8 @@ export default function ChatScreen() {
           }
 
           const newMessage = payload.new as Message
+          const shouldScrollToNewMessage =
+            newMessage.sender_id === user?.id || isNearBottomRef.current
 
           if (payload.eventType === 'UPDATE') {
             setMessages((current) =>
@@ -156,6 +165,11 @@ export default function ChatScreen() {
 
           if (newMessage.type === 'image') {
             loadImageUrl(newMessage)
+          }
+
+          if (!shouldScrollToNewMessage && newMessage.sender_id !== user?.id) {
+            setNewRoomMessageCount((count) => count + 1)
+            setShowScrollButton(true)
           }
 
           setMessages((current) => {
@@ -191,6 +205,10 @@ export default function ChatScreen() {
               },
             ]
           })
+
+          if (shouldScrollToNewMessage) {
+            setTimeout(() => scrollToLatest(), 80)
+          }
         }
       )
       .on(
@@ -442,6 +460,7 @@ export default function ChatScreen() {
           reply_message_id: replyTo?.id ?? null,
         },
       ])
+      scrollToLatest()
 
       const { error } = await supabase.rpc('send_message', {
         target_conversation_id: id,
@@ -548,6 +567,7 @@ export default function ChatScreen() {
           receiptStatus: 'sent',
         },
       ])
+      scrollToLatest()
 
       const response = await fetch(asset.uri)
       const body = await response.arrayBuffer()
@@ -652,6 +672,10 @@ export default function ChatScreen() {
   }
 
   function scrollToLatest(animated = true) {
+    isNearBottomRef.current = true
+    setShowScrollButton(false)
+    setNewRoomMessageCount(0)
+
     requestAnimationFrame(() => {
       listRef.current?.scrollToEnd({ animated })
     })
@@ -665,6 +689,29 @@ export default function ChatScreen() {
     }, 80)
   }
 
+  function handleMessageListScroll(
+    event: NativeSyntheticEvent<NativeScrollEvent>
+  ) {
+    const {
+      contentOffset,
+      contentSize,
+      layoutMeasurement,
+    } = event.nativeEvent
+    const distanceFromBottom =
+      contentSize.height -
+      layoutMeasurement.height -
+      contentOffset.y
+    const nearBottom =
+      distanceFromBottom < BOTTOM_SCROLL_THRESHOLD
+
+    isNearBottomRef.current = nearBottom
+    setShowScrollButton(!nearBottom)
+
+    if (nearBottom) {
+      setNewRoomMessageCount(0)
+    }
+  }
+
   function scrollToInitialTarget(animated = false) {
     const targetIndex = getUnreadBoundaryIndex(
       messages,
@@ -676,6 +723,9 @@ export default function ChatScreen() {
       scrollToLatest(animated)
       return
     }
+
+    isNearBottomRef.current = false
+    setShowScrollButton(true)
 
     requestAnimationFrame(() => {
       listRef.current?.scrollToIndex({
@@ -997,7 +1047,9 @@ export default function ChatScreen() {
           ref={listRef}
           onContentSizeChange={() => {
             if (initialScrollDoneRef.current) {
-              scrollToLatest()
+              if (isNearBottomRef.current) {
+                scrollToLatest()
+              }
             } else {
               scrollToInitialTarget(false)
             }
@@ -1021,6 +1073,8 @@ export default function ChatScreen() {
             })
             setTimeout(() => scrollToInitialTarget(false), 120)
           }}
+          onScroll={handleMessageListScroll}
+          scrollEventThrottle={80}
           data={messages}
           keyExtractor={(item) => item.id}
           contentContainerStyle={[
@@ -1188,6 +1242,27 @@ export default function ChatScreen() {
             )
           }}
         />
+      )}
+
+      {showScrollButton && (
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => scrollToLatest()}
+          style={styles.scrollButton}
+        >
+          <Ionicons
+            name="chevron-down"
+            size={20}
+            color="#FFFFFF"
+          />
+          {newRoomMessageCount > 0 && (
+            <View style={styles.scrollBadge}>
+              <Text style={styles.scrollBadgeText}>
+                {newRoomMessageCount > 99 ? '99+' : newRoomMessageCount}
+              </Text>
+            </View>
+          )}
+        </Pressable>
       )}
 
       <MessageActionSheet
@@ -1782,6 +1857,40 @@ const styles = StyleSheet.create({
   previewImage: {
     width: '100%',
     height: '100%',
+  },
+  scrollButton: {
+    position: 'absolute',
+    right: 18,
+    bottom: 92,
+    zIndex: 2,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.primary,
+    shadowColor: Colors.primaryShadow,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.28,
+    shadowRadius: 10,
+    elevation: 5,
+  },
+  scrollBadge: {
+    position: 'absolute',
+    top: -6,
+    right: -4,
+    minWidth: 20,
+    height: 20,
+    paddingHorizontal: 5,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.secondary,
+  },
+  scrollBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '800',
   },
   messageList: {
     paddingHorizontal: SynSpacing.lg,
