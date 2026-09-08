@@ -16,7 +16,7 @@
       "adaptiveIcon": {
         "backgroundColor": "#FF6B35",
         "foregroundImage": "./assets/images/syn_foreground.png",
-        "monochromeImage": "./assets/images/syn_monochrome.png"
+        "monochromeImage": "./assets/images/syn_foreground.png"
       },
       "predictiveBackGestureEnabled": false,
       "softwareKeyboardLayoutMode": "resize",

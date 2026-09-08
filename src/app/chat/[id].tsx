@@ -95,11 +95,13 @@ export default function ChatScreen() {
   const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null)
   const [showScrollButton, setShowScrollButton] = useState(false)
   const [newRoomMessageCount, setNewRoomMessageCount] = useState(0)
+  const [initialListReady, setInitialListReady] = useState(false)
 
   useEffect(() => {
     if (!id) return
 
     initialScrollDoneRef.current = false
+    setInitialListReady(false)
     loadMessages()
     loadChatProfile()
     markAsRead()
@@ -320,6 +322,7 @@ export default function ChatScreen() {
       scrollToInitialTarget(false)
       initialScrollReadyTimerRef.current = setTimeout(() => {
         initialScrollDoneRef.current = true
+        setInitialListReady(true)
       }, 250)
     }
   }, [loading, messages.length, unreadCount, user?.id])
@@ -565,6 +568,7 @@ export default function ChatScreen() {
           created_at: new Date().toISOString(),
           localStatus: 'pending',
           receiptStatus: 'sent',
+          reply_message_id: replyTo?.id ?? null,
         },
       ])
       scrollToLatest()
@@ -586,6 +590,7 @@ export default function ChatScreen() {
       const { error } = await supabase.rpc('send_image_message', {
         target_conversation_id: id,
         media_path: mediaPath,
+        reply_message_id: replyTo?.id ?? null,
       })
 
       if (error) {
@@ -599,6 +604,7 @@ export default function ChatScreen() {
             : message
         )
       )
+      setReplyTo(null)
     } catch (error) {
       console.error('SEND IMAGE:', error)
       setComposerError('Photo failed to send.')
@@ -1043,14 +1049,11 @@ export default function ChatScreen() {
           <ActivityIndicator color={Colors.primary} />
         </View>
       ) : (
-        <FlatList
+        <>
+          <FlatList
           ref={listRef}
           onContentSizeChange={() => {
-            if (initialScrollDoneRef.current) {
-              if (isNearBottomRef.current) {
-                scrollToLatest()
-              }
-            } else {
+            if (!initialScrollDoneRef.current) {
               scrollToInitialTarget(false)
             }
           }}
@@ -1080,6 +1083,7 @@ export default function ChatScreen() {
           contentContainerStyle={[
             styles.messageList,
             messages.length === 0 && styles.emptyList,
+            !initialListReady && messages.length > 0 && styles.hiddenList,
           ]}
           ListEmptyComponent={
             <SynEmptyState
@@ -1242,6 +1246,12 @@ export default function ChatScreen() {
             )
           }}
         />
+          {!initialListReady && messages.length > 0 && (
+            <View style={styles.loadingOverlay}>
+              <ActivityIndicator color={Colors.primary} />
+            </View>
+          )}
+        </>
       )}
 
       {showScrollButton && (
@@ -1896,6 +1906,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: SynSpacing.lg,
     paddingVertical: SynSpacing.lg,
     paddingBottom: 20,
+  },
+  hiddenList: {
+    opacity: 0,
+  },
+  loadingOverlay: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: Colors.background,
   },
   emptyList: {
     flexGrow: 1,
