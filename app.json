@@ -15,8 +15,8 @@
       "versionCode": 3,
       "adaptiveIcon": {
         "backgroundColor": "#FF6B35",
-        "foregroundImage": "./assets/images/syn_foreground.png",
-        "monochromeImage": "./assets/images/syn_foreground.png"
+        "foregroundImage": "./assets/images/syn_logo-white.png",
+        "monochromeImage": "./assets/images/syn_logo-white.png"
       },
       "predictiveBackGestureEnabled": false,
       "softwareKeyboardLayoutMode": "resize",
@@ -41,7 +41,7 @@
         "expo-splash-screen",
         {
           "backgroundColor": "#FF6B35",
-          "image": "./assets/images/syn_brand_white.png",
+          "image": "./assets/images/syn_logo-white.png",
           "imageWidth": 170
         }
       ]

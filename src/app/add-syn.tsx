@@ -382,7 +382,7 @@ async function handleMessage(target: SearchResult) {
               value={query}
               onChangeText={setQuery}
 
-              placeholder="@username, fendi, SYN482, 4821..."
+              placeholder="@username, john, SYN482 ..."
 
               autoCapitalize="none"
               autoCorrect={false}
