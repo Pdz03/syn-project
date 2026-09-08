@@ -2,7 +2,7 @@
   "expo": {
     "name": "Syn",
     "slug": "syn",
-    "version": "1.0.2",
+    "version": "1.0.21",
     "orientation": "portrait",
     "icon": "./assets/images/syn/app_icon.png",
     "scheme": "syn",
@@ -12,7 +12,7 @@
     },
     "android": {
       "icon": "./assets/images/syn/app_icon.png",
-      "versionCode": 3,
+      "versionCode": 21,
       "adaptiveIcon": {
         "backgroundColor": "#FF6B35",
         "foregroundImage": "./assets/images/syn/syn_icon.png",

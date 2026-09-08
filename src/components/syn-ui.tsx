@@ -47,8 +47,8 @@ export function SynBrandLogo({
     <Image
       source={
         variant === 'white'
-          ? require('@/assets/images/syn_brand_white.png')
-          : require('@/assets/images/syn_brand.png')
+          ? require('@/assets/images/syn/syn_brand_white.png')
+          : require('@/assets/images/syn/syn_brand.png')
       }
       resizeMode="contain"
       style={[
@@ -316,6 +316,7 @@ export function SynListItem({
   badge,
   chevron = false,
   onPress,
+  disabled = false,
 }: {
   title: string
   subtitle?: string
@@ -324,6 +325,7 @@ export function SynListItem({
   badge?: ReactNode
   chevron?: boolean
   onPress?: () => void
+  disabled?: boolean
 }) {
   const Content = (
     <View style={styles.listItemInner}>
@@ -352,7 +354,7 @@ export function SynListItem({
       </View>
 
       {badge}
-      {chevron && (
+      {chevron && !disabled && (
         <Ionicons
           name="chevron-forward"
           size={18}
@@ -362,8 +364,8 @@ export function SynListItem({
     </View>
   )
 
-  if (!onPress) {
-    return <View style={styles.listItem}>{Content}</View>
+  if (!onPress || disabled) {
+    return <View style={[styles.listItem, disabled && styles.disabled]}>{Content}</View>
   }
 
   return (
@@ -498,6 +500,9 @@ const styles = StyleSheet.create({
   },
   pressed: {
     opacity: 0.65,
+  },
+  disabled: {
+    opacity: 0.45,
   },
   label: {
     marginBottom: 7,

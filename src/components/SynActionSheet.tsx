@@ -31,8 +31,9 @@ export default function SynActionSheet({
       <ActionItem
         icon="create-outline"
         title="New Status"
-        description="Share a short update with your Syns"
+        description="Coming soon"
         onPress={onNewStatus}
+        disabled
       />
 
       <ActionItem
@@ -45,15 +46,17 @@ export default function SynActionSheet({
       <ActionItem
         icon="qr-code-outline"
         title="Scan Syn Code"
-        description="Connect using a Syn Code"
+        description="Coming soon"
         onPress={onScanSynCode}
+        disabled
       />
 
       <ActionItem
         icon="people-outline"
         title="Create Circle"
-        description="Create a private space for your people"
+        description="Coming soon"
         onPress={onCreateCircle}
+        disabled
       />
     </SynModal>
   )
@@ -64,18 +67,21 @@ function ActionItem({
   title,
   description,
   onPress,
+  disabled = false,
 }: {
   icon: keyof typeof Ionicons.glyphMap
   title: string
   description: string
   onPress: () => void
+  disabled?: boolean
 }) {
   return (
     <SynListItem
       title={title}
       subtitle={description}
       onPress={onPress}
-      chevron
+      chevron={!disabled}
+      disabled={disabled}
       left={
         <View style={styles.iconWrap}>
           <Ionicons

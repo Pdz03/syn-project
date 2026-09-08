@@ -89,7 +89,7 @@ export default function UpdatesScreen() {
       </Pressable>
 
       <Image
-        source={require('@/assets/images/syn_brand.png')}
+        source={require('@/assets/images/syn/syn_brand.png')}
         resizeMode="contain"
         style={{
           width: 132,

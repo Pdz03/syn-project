@@ -224,9 +224,8 @@ export default function MeScreen() {
           <MenuItem
             icon="settings-outline"
             title="Settings"
-            onPress={() =>
-              console.log('SETTINGS')
-            }
+            subtitle="Coming soon"
+            disabled
           />
 
           {surveyLink && (
@@ -281,21 +280,26 @@ export default function MeScreen() {
 function MenuItem({
   icon,
   title,
+  subtitle,
   onPress,
+  disabled = false,
 }: {
   icon: keyof typeof Ionicons.glyphMap
   title: string
-  onPress: () => void
+  subtitle?: string
+  onPress?: () => void
+  disabled?: boolean
 }) {
   return (
     <Pressable
+      disabled={disabled}
       onPress={onPress}
       style={({ pressed }) => ({
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: 18,
         paddingVertical: 16,
-        opacity: pressed ? 0.65 : 1,
+        opacity: disabled ? 0.45 : pressed ? 0.65 : 1,
       })}
     >
       <Ionicons
@@ -304,23 +308,37 @@ function MenuItem({
         color={Colors.primary}
       />
 
-      <Text
-        style={{
-          flex: 1,
-          marginLeft: 14,
-          fontSize: 16,
-          fontWeight: '600',
-          color: Colors.ink,
-        }}
-      >
-        {title}
-      </Text>
+      <View style={{ flex: 1, marginLeft: 14 }}>
+        <Text
+          style={{
+            fontSize: 16,
+            fontWeight: '600',
+            color: Colors.ink,
+          }}
+        >
+          {title}
+        </Text>
 
-      <Ionicons
-        name="chevron-forward"
-        size={18}
-        color={Colors.muted}
-      />
+        {subtitle && (
+          <Text
+            style={{
+              marginTop: 2,
+              fontSize: 12,
+              color: Colors.muted,
+            }}
+          >
+            {subtitle}
+          </Text>
+        )}
+      </View>
+
+      {!disabled && (
+        <Ionicons
+          name="chevron-forward"
+          size={18}
+          color={Colors.muted}
+        />
+      )}
     </Pressable>
   )
 }
