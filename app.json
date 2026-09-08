@@ -2,7 +2,7 @@
   "expo": {
     "name": "Syn",
     "slug": "syn",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "orientation": "portrait",
     "icon": "./assets/images/app_icon.png",
     "scheme": "syn",
@@ -12,11 +12,11 @@
     },
     "android": {
       "icon": "./assets/images/app_icon.png",
-      "versionCode": 2,
+      "versionCode": 3,
       "adaptiveIcon": {
         "backgroundColor": "#FF6B35",
-        "foregroundImage": "./assets/images/app_icon.png",
-        "monochromeImage": "./assets/images/app_icon.png"
+        "foregroundImage": "./assets/images/syn_foreground.png",
+        "monochromeImage": "./assets/images/syn_monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
       "softwareKeyboardLayoutMode": "resize",
