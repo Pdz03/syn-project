@@ -44,3 +44,6 @@ example
 
 *-firebase-adminsdk-*.json
 firebase-service-account.json
+# supabase CLI local
+  state
+supabase/.temp/
