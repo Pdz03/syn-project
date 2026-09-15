@@ -76,6 +76,7 @@ export default function ChatScreen() {
   const listRef = useRef<FlatList<Message>>(null)
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const initialScrollReadyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const initialScrollFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const initialScrollDoneRef = useRef(false)
   const isNearBottomRef = useRef(true)
   const { user } = useAuth()
@@ -310,6 +311,9 @@ export default function ChatScreen() {
       if (initialScrollReadyTimerRef.current) {
         clearTimeout(initialScrollReadyTimerRef.current)
       }
+      if (initialScrollFallbackTimerRef.current) {
+        clearTimeout(initialScrollFallbackTimerRef.current)
+      }
 
       supabase.removeChannel(channel).catch((error) => {
         console.error('REMOVE CHANNEL ERROR:', error)
@@ -318,13 +322,14 @@ export default function ChatScreen() {
   }, [id, user?.id, userId])
 
   useEffect(() => {
-    if (!loading && messages.length > 0 && !initialScrollDoneRef.current) {
-      scrollToInitialTarget(false)
-      initialScrollReadyTimerRef.current = setTimeout(() => {
-        initialScrollDoneRef.current = true
-        setInitialListReady(true)
-      }, 250)
+    if (loading || messages.length === 0 || initialScrollDoneRef.current) {
+      return
     }
+
+    initialScrollFallbackTimerRef.current = setTimeout(
+      () => scrollToInitialTarget(false),
+      400
+    )
   }, [loading, messages.length, unreadCount, user?.id])
 
   async function loadChatProfile() {
@@ -719,6 +724,16 @@ export default function ChatScreen() {
   }
 
   function scrollToInitialTarget(animated = false) {
+    if (initialScrollDoneRef.current || messages.length === 0) {
+      return
+    }
+
+    initialScrollDoneRef.current = true
+
+    initialScrollReadyTimerRef.current = setTimeout(() => {
+      setInitialListReady(true)
+    }, 250)
+
     const targetIndex = getUnreadBoundaryIndex(
       messages,
       user?.id,
@@ -1053,28 +1068,24 @@ export default function ChatScreen() {
           <FlatList
           ref={listRef}
           onContentSizeChange={() => {
-            if (!initialScrollDoneRef.current) {
-              scrollToInitialTarget(false)
+            scrollToInitialTarget(false)
+
+            if (isNearBottomRef.current) {
+              listRef.current?.scrollToEnd({ animated: false })
             }
           }}
-          onLayout={() => {
-            if (!initialScrollDoneRef.current) {
-              scrollToInitialTarget(false)
-            }
-          }}
-          initialScrollIndex={
-            messages.length > 1
-              ? unreadBoundaryIndex >= 0
-                ? unreadBoundaryIndex
-                : messages.length - 1
-              : undefined
-          }
           onScrollToIndexFailed={(info) => {
             listRef.current?.scrollToOffset({
               offset: info.averageItemLength * info.index,
               animated: false,
             })
-            setTimeout(() => scrollToInitialTarget(false), 120)
+            setTimeout(() => {
+              listRef.current?.scrollToIndex({
+                index: info.index,
+                animated: false,
+                viewPosition: 0.18,
+              })
+            }, 120)
           }}
           onScroll={handleMessageListScroll}
           scrollEventThrottle={80}
