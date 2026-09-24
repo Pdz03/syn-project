@@ -5,6 +5,7 @@ import {
 
 import {
   Alert,
+  Modal,
   Pressable,
   Share,
   Text,
@@ -12,6 +13,7 @@ import {
 } from 'react-native'
 
 import { Ionicons } from '@expo/vector-icons'
+import * as Clipboard from 'expo-clipboard'
 import { router } from 'expo-router'
 
 import { useAuth } from '@/providers/auth-provider'
@@ -28,6 +30,8 @@ export default function MeScreen() {
   const { profile, user } = useAuth()
   const [surveyLink, setSurveyLink] =
     useState<SurveyLink | null>(null)
+  const [shareModalVisible, setShareModalVisible] =
+    useState(false)
 
   useEffect(() => {
     getActiveSurveyLink().then(setSurveyLink)
@@ -40,6 +44,21 @@ export default function MeScreen() {
       Alert.alert('Syn ID unavailable', 'Syn ID kamu belum siap.')
       return
     }
+
+    setShareModalVisible(true)
+  }
+
+  async function handleCopySynId() {
+    if (!profile?.syn_id) return
+
+    await Clipboard.setStringAsync(profile.syn_id)
+    Alert.alert('Copied', 'Syn ID berhasil disalin.')
+  }
+
+  function handleNativeShare() {
+    const synId = profile?.syn_id
+
+    if (!synId) return
 
     Share.share({
       message: [
@@ -272,8 +291,160 @@ export default function MeScreen() {
             Log out
           </Text>
         </Pressable>
+        </View>
+
+        <Modal
+          visible={shareModalVisible}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setShareModalVisible(false)}
+        >
+          <View
+            style={{
+              flex: 1,
+              justifyContent: 'flex-end',
+              backgroundColor: 'rgba(23,24,28,0.35)',
+            }}
+          >
+            <View
+              style={{
+                padding: 22,
+                paddingBottom: 34,
+                borderTopLeftRadius: 28,
+                borderTopRightRadius: 28,
+                backgroundColor: Colors.background,
+              }}
+            >
+              <View
+                style={{
+                  alignSelf: 'center',
+                  width: 40,
+                  height: 4,
+                  marginBottom: 22,
+                  borderRadius: 2,
+                  backgroundColor: Colors.border,
+                }}
+              />
+
+              <Text
+                style={{
+                  color: Colors.ink,
+                  fontSize: 22,
+                  fontWeight: '800',
+                }}
+              >
+                Share my Syn ID
+              </Text>
+
+              <View
+                style={{
+                  marginTop: 18,
+                  padding: 22,
+                  borderRadius: 18,
+                  backgroundColor: Colors.surface,
+                  borderWidth: 1,
+                  borderColor: Colors.border,
+                }}
+              >
+                <Text
+                  style={{
+                    color: Colors.muted,
+                    fontSize: 12,
+                    fontWeight: '700',
+                    letterSpacing: 1.2,
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  Your Syn ID
+                </Text>
+
+                <Text
+                  style={{
+                    marginTop: 10,
+                    color: Colors.secondary,
+                    fontSize: 28,
+                    fontWeight: '800',
+                    letterSpacing: 1.2,
+                  }}
+                >
+                  {profile?.syn_id}
+                </Text>
+
+                <Text
+                  style={{
+                    marginTop: 12,
+                    color: Colors.muted,
+                    lineHeight: 20,
+                  }}
+                >
+                  Share your Syn ID with someone you know.
+                </Text>
+              </View>
+
+              <Pressable
+                onPress={handleCopySynId}
+                style={{
+                  marginTop: 14,
+                  paddingVertical: 15,
+                  borderRadius: 14,
+                  alignItems: 'center',
+                  backgroundColor: Colors.secondaryTint,
+                }}
+              >
+                <Text
+                  style={{
+                    color: Colors.secondary,
+                    fontWeight: '700',
+                  }}
+                >
+                  Copy Syn ID
+                </Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => {
+                  setShareModalVisible(false)
+                  handleNativeShare()
+                }}
+                style={{
+                  marginTop: 10,
+                  paddingVertical: 15,
+                  borderRadius: 14,
+                  alignItems: 'center',
+                  backgroundColor: Colors.primary,
+                }}
+              >
+                <Text
+                  style={{
+                    color: Colors.surface,
+                    fontWeight: '700',
+                  }}
+                >
+                  Share
+                </Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => setShareModalVisible(false)}
+                style={{
+                  marginTop: 8,
+                  paddingVertical: 12,
+                  alignItems: 'center',
+                }}
+              >
+                <Text
+                  style={{
+                    color: Colors.muted,
+                    fontWeight: '600',
+                  }}
+                >
+                  Cancel
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
       </View>
-    </View>
   )
 }
 

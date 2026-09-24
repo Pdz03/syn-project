@@ -4,6 +4,8 @@ import {
 } from 'react-native'
 
 import { Stack } from 'expo-router'
+import { StatusBar } from 'expo-status-bar'
+import { NavigationBar } from 'expo-navigation-bar'
 
 import {
   AuthProvider,
@@ -14,6 +16,7 @@ import { useEffect } from 'react'
 import { router } from 'expo-router'
 import * as Notifications from 'expo-notifications'
 import { supabase } from '@/lib/supabase'
+import { Colors } from '@/constants/colors'
 
 function RootNavigator() {
   const {
@@ -134,6 +137,12 @@ export default function RootLayout() {
 
   return (
     <AuthProvider>
+      <StatusBar
+        style="dark"
+        backgroundColor={Colors.background}
+        translucent={false}
+      />
+      <NavigationBar style="light" hidden={false} />
       <RootNavigator />
     </AuthProvider>
   )

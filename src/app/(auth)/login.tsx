@@ -2,7 +2,10 @@ import { useState } from 'react'
 
 import {
   Alert,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -51,7 +54,15 @@ export default function LoginScreen() {
   }
 
   return (
-    <View style={styles.screen}>
+    <KeyboardAvoidingView
+      style={styles.screen}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    >
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+      >
       <View style={styles.brandRow}>
         <SynBrandLogo />
       </View>
@@ -110,7 +121,8 @@ export default function LoginScreen() {
           </Text>
         </Pressable>
       </View>
-    </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   )
 }
 
@@ -118,6 +130,9 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: Colors.surface,
+  },
+  scrollContent: {
+    flexGrow: 1,
   },
   brandRow: {
     paddingTop: 58,
